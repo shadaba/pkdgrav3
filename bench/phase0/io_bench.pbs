@@ -20,10 +20,13 @@ nfsstat -m 2>&1
 FIO=$(command -v fio || true); echo "fio: ${FIO:-not found, using dd}"
 RAND=/dev/shm/p0rand_$$; RAND_MB=4096       # incompressible source for dd (server may compress zeros)
 [ -z "$FIO" ] && head -c ${RAND_MB}M /dev/urandom > $RAND
-trap 'rm -f $RAND' EXIT
+CUR=""   # target being written; removed if PBS kills the job at walltime (SIGTERM)
+trap 'rm -f $RAND; [ -n "$CUR" ] && rm -rf "$CUR"' EXIT
+trap 'echo "killed (SIGTERM), cleaning $CUR"; kill $(jobs -p) 2>/dev/null; exit 143' TERM
 printf "%-45s %8s %10s %10s %10s\n" target streams GB_total seconds MB_per_s
 for T in $TARGETS; do
   mkdir -p "$T" || { echo "cannot create $T"; continue; }
+  CUR=$T
   for N in $STREAMS; do
     MB_PER=$(( TOTAL_GB * 1024 / N )); CNT=$(( MB_PER / 4 ))
     sync; t0=$(date +%s.%N)
@@ -41,6 +44,6 @@ for T in $TARGETS; do
       'BEGIN{s=b-a; printf "%-45s %8d %10d %10.1f %10.0f\n", t, n, g, s, g*1024/s}'
     rm -f "$T"/s* "$T"/w.* 2>/dev/null
   done
-  rm -rf "$T"
+  rm -rf "$T"; CUR=""
 done
 echo "done $(date -Is)"
