@@ -1,0 +1,22 @@
+#!/bin/bash
+# Phase 0: node-local scratch / filesystem probe on a compute node. Read-only, ~1 min.
+#PBS -N p0_probe
+#PBS -q workq
+#PBS -l select=1:ncpus=1:mem=1gb
+#PBS -l walltime=00:05:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p0_probe.out
+set -u
+echo "host: $(hostname)  date: $(date -Is)  PBS_JOBID=${PBS_JOBID:-}"
+echo "== lscpu";        lscpu | grep -E "Model name|^CPU\(s\)|Socket|NUMA node\(s\)|Thread"
+echo "== free -g";      free -g
+echo "== lsblk";        lsblk -o NAME,SIZE,TYPE,ROTA,MOUNTPOINT,MODEL 2>&1
+echo "== df -hT";       df -hT -x tmpfs -x devtmpfs 2>&1; df -hT /dev/shm /tmp 2>&1
+echo "== mounts";       mount | grep -E " / | /user| /home| /storage| /scratch| /local| /tmp" 2>&1
+echo "== nfsstat -m";   nfsstat -m 2>&1
+echo "== candidate scratch dirs"
+for d in /scratch /local /localscratch /tmp /var/tmp /data /mnt/* "${TMPDIR:-}" "${PBS_TMPDIR:-}"; do
+  [ -n "$d" ] && [ -d "$d" ] && { printf "%-20s " "$d"; df -hT "$d" | tail -1; [ -w "$d" ] && echo "   writable by $USER"; }
+done
+echo "== tools";        for t in fio dd gzip pigz zstd h5cc; do printf "%-6s %s\n" $t "$(command -v $t || echo MISSING)"; done
+echo "== env TMPDIR=${TMPDIR:-unset}"

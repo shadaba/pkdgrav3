@@ -1,0 +1,37 @@
+# Phase 0 baseline: 512^3, same mass resolution as the 2048^3 / 200 Mpc/h production run.
+# Internal 2LPT ICs at z=49, 2 steps, a snapshot after each step (2 writes per run).
+# pkdgrav3 3.5.1 syntax; accuracy and memory settings follow sahyadri2048.par.
+from accuracy import classic_theta_switch, classic_replicas_switch
+achOutName      = "snap"
+achTfFile       = "euclid_z0_transfer_combined.dat"
+nGrid           = 512
+dBoxSize        = 50
+iLPT            = 2
+iSeed           = 314159265
+dRedFrom        = 49
+dRedTo          = 40
+nSteps          = 2
+iOutInterval    = 1
+iCheckInterval  = 0
+h               = 0.6736
+dOmega0         = 0.3137721
+dLambda         = 0.6862279
+dSigma8         = 0.81
+dSpectral       = 0.965
+bComove         = 1
+bPeriodic       = 1
+bEwald          = 1
+bEpsAccStep     = 1
+bNewKDK         = 1
+dEta            = 0.3
+dTheta          = classic_theta_switch()
+nReplicas       = classic_replicas_switch()
+bDoPotOutput    = 0
+bMemUnordered   = 1
+bMemParticleID  = 1
+bDoDensity      = 0
+bVDetails       = 1
+bOverwrite      = 1
+bParaRead       = 1
+bParaWrite      = 0
+# bHDF5 is set on the command line by the job script (-hdf5 / +hdf5)

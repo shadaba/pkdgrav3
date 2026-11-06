@@ -1,0 +1,38 @@
+#!/bin/bash
+# Phase 0: stock-fork 512^3 baseline. Same run written to NFS (/storage) and to /dev/shm, in HDF5 and
+# tipsy, to separate software cost (conversion, HDF5, single writer) from storage cost.
+# Measurement: pkdgrav3's own "Output file has been successfully written, Wallclock: X secs" line per
+# snapshot (2 per run), plus /usr/bin/time -v for peak RSS. Outputs are deleted at the end.
+#PBS -N p0_base512
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=96gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p0_base512.out
+set -u
+W=/storage/shadab/pkdgrav3_io
+BIN=${BIN:-$W/build/pkdgrav3}          # stock fork build (see build_pawna.sh)
+NTH=${NTH:-64}
+SRC=$W/pkdgrav3
+TARGETS=${TARGETS:-"$W/bench/run512_nfs /dev/shm/shadab_run512"}
+FORMATS=${FORMATS:-"hdf5 tipsy"}
+[ -x "$BIN" ] || { echo "missing $BIN"; exit 1; }
+echo "host: $(hostname)  date: $(date -Is)  PBS_JOBID=${PBS_JOBID:-}  BIN=$BIN  threads=$NTH"
+(cd $SRC && git log -1 --format="source: %h %s")
+ldd $BIN | grep -E "hdf5|mpi"
+trap 'rm -rf /dev/shm/shadab_run512' EXIT
+printf "%-35s %-6s %s\n" target format write_seconds_per_snapshot > $W/bench/logs/p0_base512.summary
+for T in $TARGETS; do for F in $FORMATS; do
+  D=$T/$F; rm -rf $D; mkdir -p $D && cd $D || continue
+  cp $SRC/bench/phase0/baseline512.par $SRC/examples/euclid_z0_transfer_combined.dat .
+  [ $F = hdf5 ] && H="+hdf5" || H="-hdf5"
+  /usr/bin/time -v $BIN -sz $NTH $H baseline512.par > run.log 2> time.log
+  echo "== $T $F rc=$?"; grep -E "Maximum resident|Elapsed" time.log
+  S=$(grep "Output file has been successfully written" run.log | sed 's/.*Wallclock: \([0-9.]*\).*/\1/' | tr '\n' ' ')
+  ls -la snap.* 2>/dev/null
+  printf "%-35s %-6s %s\n" $T $F "$S" | tee -a $W/bench/logs/p0_base512.summary
+  cp run.log $W/bench/logs/p0_base512_$(basename $T)_$F.log
+  cd / && rm -rf $D
+done; done
+rm -rf $W/bench/run512_nfs
+cat $W/bench/logs/p0_base512.summary
