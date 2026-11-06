@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh pawna df *)",
+      "Bash(ssh pawna mount*)",
+      "Bash(ssh pawna nfsstat *)",
+      "Bash(ssh pawna lscpu*)",
+      "Bash(ssh pawna free *)",
+      "Bash(ssh pawna ls *)",
+      "Bash(ssh pawna qstat*)",
+      "Bash(ssh pawna pbsnodes*)"
+    ]
+  }
+}
