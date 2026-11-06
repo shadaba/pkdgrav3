@@ -61,3 +61,11 @@ Option B to test offline (decision experiment, not a commitment): Lagrangian (ID
 - Are IDs Lagrangian grid indices (id = (i*N+j)*N+k)?
 - Does pawna have node-local scratch disk?
 - Accuracy target: keep current uint8 cell offset + 12-bit velocity and current Ngrid?
+
+## 8. Notes after rebasing onto pkdgrav3 3.5.1 (2026-11-06)
+Section 3 was read from wullm 7a5041e (3.1.2). The branch is now based on upstream v3.5.1 (dcce745f), the release production runs; section 3 must be re-checked against it.
+- Production binary: /user/swarajit/apps_user/pkdgrav3_openmpi/bin/pkdgrav3, built from /user/swarajit/src/pkdgrav3-3.5.1, linked to conda env pkdgrav_no_mpi (HDF5 2.1.0, threadsafe ON, parallel OFF) and /apps/openmpi-5.0.1; run with `mpirun -np 1`.
+- gzip source (open item 1): 3.5.1 hardcodes shuffle + H5Pset_deflate(level 9) + Fletcher32 (io/fio.c:2535); the production job LD_PRELOADs libh5shim.so with PKD_H5_DEFLATE=1 to force level 1.
+- HDF5 chunks are (65536, 1): every column is chunked and compressed separately. Density and Potential columns are written even with bDoPotOutput=0.
+- Mac, 256^3, 12 threads, local SSD, pkdgrav3 "Output file ... Wallclock" line: HDF5 (gzip 9) 66 s/snapshot, 326 MB; tipsy 2.9 s, 604 MB. Software cost dominates on fast storage.
+- Production 2048^3 snapshot on disk: 166 GB (gzip 1), not 275 GB.
