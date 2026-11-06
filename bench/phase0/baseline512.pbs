@@ -18,7 +18,7 @@ SRC=$W/pkdgrav3
 TARGETS=${TARGETS:-"$W/bench/run512_nfs /dev/shm/shadab_run512"}
 FORMATS=${FORMATS:-"hdf5 tipsy"}
 [ -x "$BIN" ] || { echo "missing $BIN"; exit 1; }
-module purge; module load openmpi-5.0.1      # same MPI as production; launched like production
+source $SRC/bench/phase0/env_pawna.sh   # openmpi-5.0.1, no Intel MPI paths, venv PYTHONPATH
 RUN="mpirun --bind-to none -np 1"
 echo "host: $(hostname)  date: $(date -Is)  PBS_JOBID=${PBS_JOBID:-}  BIN=$BIN  threads=$NTH"
 (cd $SRC && git log -1 --format="source: %h %s")

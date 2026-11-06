@@ -1,0 +1,18 @@
+#!/bin/bash -l
+# 32^3, 2 steps, HDF5 to /dev/shm: checks the pawna build runs before longer jobs. ~1 min.
+#PBS -N p0_smoke32
+#PBS -q workq
+#PBS -l select=1:ncpus=8:mem=8gb
+#PBS -l walltime=00:10:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p0_smoke32.out
+J=${PBS_JOBID%%.*}
+exec > /storage/shadab/pkdgrav3_io/bench/logs/p0_smoke32.$J.log 2>&1
+W=/storage/shadab/pkdgrav3_io; SRC=$W/pkdgrav3; D=/dev/shm/shadab_smoke_$J
+source $SRC/bench/phase0/env_pawna.sh
+mkdir -p $D && cd $D
+sed "s/^nGrid .*/nGrid = 32/" $SRC/bench/phase0/baseline512.par > p.par
+cp $SRC/examples/euclid_z0_transfer_combined.dat .
+mpirun --bind-to none -np 1 $W/build/pkdgrav3 -sz 8 +hdf5 p.par > run.log 2>&1; echo rc=$?
+cat run.log; ls -la
+cd /; rm -rf $D

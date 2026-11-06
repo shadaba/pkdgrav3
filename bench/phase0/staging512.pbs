@@ -22,7 +22,7 @@ STAGE=${STAGE:-/var/tmp/shadab_stage_$J}      # node-local
 RUN=$W/bench/stage512_$J                      # run dir (logs) on NFS
 DEST=$RUN/snapshots                           # final snapshots on NFS
 [ -x "$BIN" ] || { echo "missing $BIN"; exit 1; }
-module purge; module load openmpi-5.0.1
+source $SRC/bench/phase0/env_pawna.sh   # openmpi-5.0.1, no Intel MPI paths, venv PYTHONPATH
 echo "host: $(hostname)  date: $(date -Is)  BIN=$BIN  threads=$NTH  stage=$STAGE  bw=$BW"
 df -h /var/tmp | tail -1
 mkdir -p $RUN && cd $RUN
