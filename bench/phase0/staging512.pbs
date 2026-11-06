@@ -1,0 +1,45 @@
+#!/bin/bash -l
+# Phase 0: 512^3 run with snapshots staged on node-local disk and drained to NFS by
+# tools/staging/pkd_drain.py during the run. Compare the per-snapshot write time (pkdgrav3
+# "Output file ... Wallclock" line = simulation stall) with baseline512.pbs writing to NFS.
+# 4 steps, a snapshot after each, HDF5 (stock) format. Drain events and copy MB/s go to the
+# drain report. Outputs are deleted at the end.
+#PBS -N p0_stage512
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=96gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p0_stage512.out
+set -u
+J=${PBS_JOBID%%.*}
+exec > /storage/shadab/pkdgrav3_io/bench/logs/p0_stage512.$J.log 2>&1   # PBS -o copy-back is unreliable here
+W=/storage/shadab/pkdgrav3_io
+SRC=$W/pkdgrav3
+BIN=${BIN:-$W/build/pkdgrav3}
+NTH=${NTH:-64}
+BW=${BW:-0}                                   # drain rate limit, MB/s (0 = none)
+STAGE=${STAGE:-/var/tmp/shadab_stage_$J}      # node-local
+RUN=$W/bench/stage512_$J                      # run dir (logs) on NFS
+DEST=$RUN/snapshots                           # final snapshots on NFS
+[ -x "$BIN" ] || { echo "missing $BIN"; exit 1; }
+module purge; module load openmpi-5.0.1
+echo "host: $(hostname)  date: $(date -Is)  BIN=$BIN  threads=$NTH  stage=$STAGE  bw=$BW"
+df -h /var/tmp | tail -1
+mkdir -p $RUN && cd $RUN
+cp $SRC/bench/phase0/baseline512.par p.par
+sed -i 's/^nSteps .*/nSteps          = 4/' p.par
+echo "achIoPath = \"$STAGE/current/{name}.{step:05d}{type}\"" >> p.par
+cp $SRC/examples/euclid_z0_transfer_combined.dat .
+python3 $SRC/tools/staging/pkd_drain.py --stage $STAGE --dest $DEST --init-only
+/usr/bin/time -v mpirun --bind-to none -np 1 $BIN -sz $NTH +hdf5 p.par > run.log 2> time.log &
+PKD=$!
+nice -n 19 ionice -c 3 python3 $SRC/tools/staging/pkd_drain.py --stage $STAGE --dest $DEST \
+     --log $RUN/run.log --pid $PKD --bwlimit $BW --min-free-gb 200 --poll 5 --report $RUN/drain.log
+DRC=$?
+wait $PKD; echo "pkdgrav3 rc=$?  drain rc=$DRC"
+grep -E "Maximum resident|Elapsed" time.log
+echo "== per-snapshot write (stall) seconds:"; grep "Output file has been successfully written" run.log
+echo "== drain:"; cat drain.log
+ls -la $DEST
+cp run.log $W/bench/logs/p0_stage512.$J.run.log; cp drain.log $W/bench/logs/p0_stage512.$J.drain.log
+rm -rf $RUN $STAGE
