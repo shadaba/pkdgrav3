@@ -69,3 +69,21 @@ Section 3 was read from wullm 7a5041e (3.1.2). The branch is now based on upstre
 - HDF5 chunks are (65536, 1): every column is chunked and compressed separately. Density and Potential columns are written even with bDoPotOutput=0.
 - Mac, 256^3, 12 threads, local SSD, pkdgrav3 "Output file ... Wallclock" line: HDF5 (gzip 9) 66 s/snapshot, 326 MB; tipsy 2.9 s, 604 MB. Software cost dominates on fast storage.
 - Production 2048^3 snapshot on disk: 166 GB (gzip 1), not 275 GB.
+
+## 9. Storage on pawna and node-local staging (2026-11-06)
+Probe job on node4 (inside PBS) plus login-node probes:
+- `/storage`: NFS 4.2 from 10.20.255.85, rsize/wsize 1 MiB, hard, TCP, no nconnect; 421 TB, 216 TB free. Production output goes here.
+- Home `/user`: ext4 on the login node (164 TB, 36 TB free), NFS 4.2 to compute nodes (10.20.255.80). Same protocol, smaller server, less space: not a better target.
+- Node-local: each compute node has a 1.5 TB SSD array (MegaRAID MR9540-8i) as `/`, about 1.4 TB free; `/tmp`, `/var/tmp` and PBS's `$TMPDIR=/var/tmp/pbs.<jobid>` are writable. `/dev/shm` is 378 GB of RAM (too valuable at 2048^3).
+- Write ceilings (fio-style, bs=4M, 1/4/16/64 streams): pending, jobs 2536378 (NFS + home) and 2536379 (node-local).
+
+Staging design (decided: separate drain process first; in-process copy only if measurements show interference):
+- Write side needs no code change. pkdgrav3 3.5.1 sends snapshots to `achIoPath` while logs and checkpoints follow `achOutPath`/`achCheckpointPath`. Set `achIoPath = "<stage>/current/{name}.{step:05d}{type}"` with `<stage>` on local disk; checkpoints stay on NFS so restarts never depend on a node's disk.
+- `tools/staging/pkd_drain.py` (stdlib Python) runs next to pkdgrav3 in the same PBS job. A snapshot counts as finished when the log shows "Writing <path> ..." followed by "Output file has been successfully written", or when `<path>.done` exists (our compressed writer will create one). It copies every piece to NFS as `.part` in 16 MiB chunks with an optional MB/s limit, fsyncs, checks the size, renames into place, fsyncs the directory, then deletes the local copy.
+- Disk guard: `<stage>/current` is a symlink to `<stage>/local`; if local free space drops below `--min-free-gb` it is atomically switched to the NFS destination (later snapshots go straight to NFS) and switched back when space recovers.
+- End of job: the drain exits when pkdgrav3 has ended and everything finished is copied (exit 2 if anything is left). The job script must leave time for this: set pkdgrav3's `iWallRunTime` below the PBS walltime by at least one snapshot's copy time.
+- Run the drain with `nice -n 19 ionice -c 3`; it uses about one core and NFS bandwidth while 191 cores compute.
+- Works with the production binary today and with the compressed format later (multi-file pieces + `.done`).
+- Tested on the Mac (64^3, 4 HDF5 snapshots): drain after the run and during it; all copies valid; rate limit and space switch triggered as designed.
+- Risks: node failure loses snapshots not yet drained (checkpoints are safe); the copy competes with the run's MPI/NFS traffic (to be measured at 512^3 on pawna); PBS kill at walltime can interrupt a copy (the `.part` file is left, the local original is kept).
+- In-process alternative (later, only if needed): a low-priority pthread in pkdgrav3 that copies between steps; it knows exactly when writes finish and can pause during communication-heavy phases, but needs code in pkdgrav3 and shares the process's failure modes.
