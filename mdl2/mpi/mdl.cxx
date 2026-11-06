@@ -59,6 +59,8 @@ static inline int size_t_to_int(size_t v) {
 #ifdef __linux__
     #include <sys/resource.h>
     #include <sys/mman.h>
+#elif defined(__APPLE__)
+    #include <sys/mman.h>
 #endif
 #include "mpi.h"
 #if defined(USE_CPPTRACE)
