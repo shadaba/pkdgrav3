@@ -11,6 +11,7 @@
 #PBS -j oe
 #PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p0_io.out
 set -u
+exec > /storage/shadab/pkdgrav3_io/bench/logs/p0_io.${PBS_JOBID%%.*}.log 2>&1   # PBS -o copy-back is unreliable here
 TOTAL_GB=${TOTAL_GB:-64}              # per test; 8 tests total -> ~512 GB written, deleted as we go
 STREAMS=${STREAMS:-"1 4 16 64"}
 TARGETS=${TARGETS:-"/storage/shadab/pkdgrav3_io/bench/io_tmp /user/shadab/pkdgrav3_io_bench_tmp"}

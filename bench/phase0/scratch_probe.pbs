@@ -7,6 +7,7 @@
 #PBS -j oe
 #PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p0_probe.out
 set -u
+exec > /storage/shadab/pkdgrav3_io/bench/logs/p0_probe.${PBS_JOBID%%.*}.log 2>&1   # PBS -o copy-back is unreliable here
 echo "host: $(hostname)  date: $(date -Is)  PBS_JOBID=${PBS_JOBID:-}"
 echo "== lscpu";        lscpu | grep -E "Model name|^CPU\(s\)|Socket|NUMA node\(s\)|Thread"
 echo "== free -g";      free -g

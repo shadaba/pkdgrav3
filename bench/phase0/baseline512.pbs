@@ -10,6 +10,7 @@
 #PBS -j oe
 #PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p0_base512.out
 set -u
+exec > /storage/shadab/pkdgrav3_io/bench/logs/p0_base512.${PBS_JOBID%%.*}.log 2>&1   # PBS -o copy-back is unreliable here
 W=/storage/shadab/pkdgrav3_io
 BIN=${BIN:-$W/build/pkdgrav3}          # stock fork build (see build_pawna.sh)
 NTH=${NTH:-64}
