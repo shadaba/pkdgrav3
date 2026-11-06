@@ -222,10 +222,18 @@ def main():
     p.add_argument("--poll", type=float, default=10, help="seconds between checks")
     p.add_argument("--report", help="append events here (default stdout)")
     p.add_argument("--init-only", action="store_true", help="create stage dirs and symlink, then exit")
+    p.add_argument("--recover", action="store_true",
+                   help="after pkdgrav3 has ended: drain every file left in <stage>/local, then exit "
+                        "(a snapshot interrupted mid-write is copied too; check it)")
     a = p.parse_args()
     d = Drainer(a)
     if a.init_only:
         return 0
+    if a.recover:
+        for n in sorted(os.listdir(d.local)):
+            if not n.endswith((".part", ".done")):
+                d.add(n)
+        d.stop = True  # no pid to wait for: drain once and exit
     signal.signal(signal.SIGTERM, lambda *_: setattr(d, "stop", True))
     return d.run()
 

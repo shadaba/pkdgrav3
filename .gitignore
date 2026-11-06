@@ -17,3 +17,6 @@ test-reports
 .cache/
 run-tests/
 compile_commands.json
+
+# shared libraries built from tools/
+/tools/h5shim/*.so

@@ -1,0 +1,95 @@
+#!/bin/bash -l
+# Run pkdgrav3 on pawna with snapshots staged on node-local SSD and drained to NFS during the run.
+# Logs and checkpoints are written in RUNDIR (NFS) as usual; only snapshots go via local disk.
+#
+# Usage (all settings via -v; RUNDIR and one of PAR / RESTART are required):
+#   fresh:    qsub -v RUNDIR=/storage/shadab/runs/test512,PAR=test512.par tools/staging/run_staged.pbs
+#   restart:  qsub -v RUNDIR=/storage/shadab/runs/test512,RESTART=snap.00100.chk tools/staging/run_staged.pbs
+# Options (defaults in brackets):
+#   PAR      parameter file for a fresh start, relative to RUNDIR or absolute
+#   RESTART  checkpoint to restart from (writes `import PKDGRAV; PKDGRAV.restore(...)`; the
+#            `from PKDGRAV import restore` form makes pkdgrav3 run the whole simulation again
+#            from the ICs after the restart finishes)
+#   DEST     final snapshot directory on NFS                             [$RUNDIR/snapshots]
+#   BIN      pkdgrav3 executable                     [/storage/shadab/pkdgrav3_io/build/pkdgrav3]
+#   ENVSH    script sourced to set up modules/env    [$SRC/bench/phase0/env_pawna.sh]
+#   NTH      worker threads (-sz)                                        [$NCPUS from PBS]
+#   STAGE    local staging dir; must not change between restarts    [/var/tmp/$USER_stage_<rundir name>]
+#   BW       drain rate limit in MB/s, 0 = none                          [0]
+#   MINFREE  local free GB below which new snapshots go straight to NFS  [200]
+#   H5LEVEL  if set, force HDF5 gzip level via tools/h5shim (0 = no gzip, 1 = production)
+#   STAGING  1 = stage on local disk, 0 = write snapshots straight to DEST  [1]
+# Edit the #PBS lines (or override with qsub -l) for size and walltime. Leave pkdgrav3's
+# iWallRunTime (minutes) below the PBS walltime by at least one snapshot drain time.
+#PBS -N pkd_staged
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=96gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+: "${RUNDIR:?set RUNDIR}"
+[ -n "${PAR:-}${RESTART:-}" ] || { echo "set PAR or RESTART"; exit 1; }
+SRC=/storage/shadab/pkdgrav3_io/pkdgrav3
+BIN=${BIN:-/storage/shadab/pkdgrav3_io/build/pkdgrav3}
+ENVSH=${ENVSH:-$SRC/bench/phase0/env_pawna.sh}
+NTH=${NTH:-${NCPUS:-64}}
+DEST=${DEST:-$RUNDIR/snapshots}
+STAGE=${STAGE:-/var/tmp/${USER}_stage_$(basename "$RUNDIR")}
+BW=${BW:-0}; MINFREE=${MINFREE:-200}; STAGING=${STAGING:-1}
+DRAIN=$SRC/tools/staging/pkd_drain.py
+
+cd "$RUNDIR" || exit 1
+exec > "$RUNDIR/staged.$J.log" 2>&1        # PBS -o copy-back is unreliable on pawna
+source "$ENVSH"
+echo "host $(hostname)  job $PBS_JOBID  $(date -Is)"
+echo "BIN=$BIN NTH=$NTH PAR=${PAR:-} RESTART=${RESTART:-} DEST=$DEST STAGE=$STAGE STAGING=$STAGING BW=$BW MINFREE=$MINFREE H5LEVEL=${H5LEVEL:-unset}"
+df -h /var/tmp "$RUNDIR" | sed 1d
+
+# Snapshot path: local staging (drained) or straight to DEST.
+if [ "$STAGING" = 1 ]; then
+  python3 "$DRAIN" --stage "$STAGE" --dest "$DEST" --init-only
+  IOPATH="$STAGE/current/{name}.{step:05d}{type}"
+else
+  mkdir -p "$DEST"; IOPATH="$DEST/{name}.{step:05d}{type}"
+fi
+# Parameter file for this job (the original is not touched). A checkpoint stores achIoPath, so on
+# restart it is passed explicitly; STAGE is per run, not per job, so it matches anyway.
+P=$RUNDIR/.staged.$J.par
+if [ -n "${RESTART:-}" ]; then
+  printf 'import PKDGRAV\nPKDGRAV.restore("%s", achIoPath="%s")\n' "$RESTART" "$IOPATH" > "$P"
+else
+  cp "$PAR" "$P"; echo "achIoPath = \"$IOPATH\"" >> "$P"
+fi
+echo "== job parameter file $P:"; tail -3 "$P"
+
+PRELOAD=""
+if [ -n "${H5LEVEL:-}" ]; then
+  PRELOAD="-x LD_PRELOAD=$SRC/tools/h5shim/libh5_deflate_shim.so -x PKD_H5_DEFLATE=$H5LEVEL"
+fi
+
+/usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH $PRELOAD "$BIN" -sz "$NTH" "$P" \
+    > "$RUNDIR/run.$J.log" 2> "$RUNDIR/time.$J.log" &
+PKD=$!
+
+DRC=0
+if [ "$STAGING" = 1 ]; then
+  nice -n 19 ionice -c 3 python3 "$DRAIN" --stage "$STAGE" --dest "$DEST" --log "$RUNDIR/run.$J.log" \
+       --pid $PKD --bwlimit "$BW" --min-free-gb "$MINFREE" --poll 10 --report "$RUNDIR/drain.$J.log"
+  DRC=$?
+fi
+wait $PKD; PRC=$?
+echo "pkdgrav3 rc=$PRC  drain rc=$DRC  $(date -Is)"
+grep -E "Maximum resident|Elapsed" "$RUNDIR/time.$J.log"
+echo "== snapshot write (stall) times:"; grep "Output file has been successfully written" "$RUNDIR/run.$J.log"
+[ "$STAGING" = 1 ] && { echo "== drain:"; grep -E "drained|current ->|ERROR|LEFT|all drained" "$RUNDIR/drain.$J.log"; }
+
+if [ "$STAGING" = 1 ]; then
+  if [ $DRC -eq 0 ]; then
+    rm -rf "$STAGE"
+  else
+    echo "WARNING: data left in $STAGE on $(hostname); NOT deleted. Copy it with:"
+    echo "  python3 $DRAIN --recover --stage $STAGE --dest $DEST   (in a job on $(hostname))"
+  fi
+fi
+exit $PRC

@@ -69,13 +69,20 @@ Section 3 was read from wullm 7a5041e (3.1.2). The branch is now based on upstre
 - HDF5 chunks are (65536, 1): every column is chunked and compressed separately. Density and Potential columns are written even with bDoPotOutput=0.
 - Mac, 256^3, 12 threads, local SSD, pkdgrav3 "Output file ... Wallclock" line: HDF5 (gzip 9) 66 s/snapshot, 326 MB; tipsy 2.9 s, 604 MB. Software cost dominates on fast storage.
 - Production 2048^3 snapshot on disk: 166 GB (gzip 1), not 275 GB.
+- Restart "second pass": with `from PKDGRAV import restore` in the restart file, pkdgrav3 does not see the PKDGRAV module in the script's namespace, so after `restore()` returns it generates ICs and runs the whole simulation again (msrpython.cxx `is_PKDGRAV_imported`; main.cxx). `import PKDGRAV; PKDGRAV.restore(...)` avoids it (tested on the Mac, 32^3). This is what the production guard scripts detect and kill.
+- A checkpoint stores `achIoPath`; a restart reuses it unless `restore(..., achIoPath=...)` overrides it (tested).
 
 ## 9. Storage on pawna and node-local staging (2026-11-06)
 Probe job on node4 (inside PBS) plus login-node probes:
 - `/storage`: NFS 4.2 from 10.20.255.85, rsize/wsize 1 MiB, hard, TCP, no nconnect; 421 TB, 216 TB free. Production output goes here.
 - Home `/user`: ext4 on the login node (164 TB, 36 TB free), NFS 4.2 to compute nodes (10.20.255.80). Same protocol, smaller server, less space: not a better target.
 - Node-local: each compute node has a 1.5 TB SSD array (MegaRAID MR9540-8i) as `/`, about 1.4 TB free; `/tmp`, `/var/tmp` and PBS's `$TMPDIR=/var/tmp/pbs.<jobid>` are writable. `/dev/shm` is 378 GB of RAM (too valuable at 2048^3).
-- Write ceilings (fio-style, bs=4M, 1/4/16/64 streams): pending, jobs 2536378 (NFS + home) and 2536379 (node-local).
+- Write ceilings, measured with parallel `dd` (bs=4M, incompressible data from a /dev/shm file, `conv=fdatasync`, one file per stream, 64 GB in total per row, wall time from start to the last fdatasync; fio is not installed). Node4, 2026-11-06:
+  - node-local `/var/tmp`: 427 / 797 / 1458 / 1035 MB/s for 1 / 4 / 16 / 64 streams (job 2536379).
+  - NFS `/storage`: 28 MB/s (1 stream), 25 MB/s (4 streams) (job 2536378; a pawna build was downloading to /storage at the same time). More streams do not help: the total is capped at about 25-30 MB/s, which by itself explains production's 30 MB/s.
+  - Links are 10 GbE (1.25 GB/s), so the cap is the NFS server side or other users' load. Ask the admins: sync export? disks? nconnect?
+  - Home `/user`: pending (job ran out of wall time; rerun with a smaller total).
+- Consequence: a single 166 GB snapshot needs about 1.5-1.8 h on NFS whatever we do in pkdgrav3. Staging removes it from the simulation's critical path; compression shortens the background copy. The 20x stall target can only be met with staging (or a faster NFS).
 
 Staging design (decided: separate drain process first; in-process copy only if measurements show interference):
 - Write side needs no code change. pkdgrav3 3.5.1 sends snapshots to `achIoPath` while logs and checkpoints follow `achOutPath`/`achCheckpointPath`. Set `achIoPath = "<stage>/current/{name}.{step:05d}{type}"` with `<stage>` on local disk; checkpoints stay on NFS so restarts never depend on a node's disk.
@@ -84,6 +91,7 @@ Staging design (decided: separate drain process first; in-process copy only if m
 - End of job: the drain exits when pkdgrav3 has ended and everything finished is copied (exit 2 if anything is left). The job script must leave time for this: set pkdgrav3's `iWallRunTime` below the PBS walltime by at least one snapshot's copy time.
 - Run the drain with `nice -n 19 ionice -c 3`; it uses about one core and NFS bandwidth while 191 cores compute.
 - Works with the production binary today and with the compressed format later (multi-file pieces + `.done`).
-- Tested on the Mac (64^3, 4 HDF5 snapshots): drain after the run and during it; all copies valid; rate limit and space switch triggered as designed.
+- Tested on the Mac (64^3, 4 HDF5 snapshots): drain after the run and during it; all copies valid; rate limit and space switch triggered as designed. `--recover` drains leftovers after a crash.
+- Usage, job script and examples: [running_on_pawna.md](running_on_pawna.md) (`tools/staging/run_staged.pbs`).
 - Risks: node failure loses snapshots not yet drained (checkpoints are safe); the copy competes with the run's MPI/NFS traffic (to be measured at 512^3 on pawna); PBS kill at walltime can interrupt a copy (the `.part` file is left, the local original is kept).
 - In-process alternative (later, only if needed): a low-priority pthread in pkdgrav3 that copies between steps; it knows exactly when writes finish and can pause during communication-heavy phases, but needs code in pkdgrav3 and shares the process's failure modes.
