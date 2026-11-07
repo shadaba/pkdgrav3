@@ -22,8 +22,8 @@ Storage seen from a compute node:
 
 | Path | What it is | Free | Write speed (Phase 0, 4 MB blocks, flushed) |
 |---|---|---|---|
-| `/storage` | NFS 4.2 from 10.20.255.85 | 216 TB | about 25-28 MB/s in total; 1 and 4 streams the same |
-| `/user` (home) | NFS 4.2 from the login node | 36 TB | pending |
+| `/storage` | NFS 4.2 from 10.20.255.85 | 216 TB | 28 / 25 / 28 / 33 MB/s with 1 / 4 / 16 / 64 streams (total is capped) |
+| `/user` (home) | NFS 4.2 from the login node | 36 TB | 270 / 325 / 395 / 488 MB/s (8 GB tests; upper bound) |
 | `/var/tmp`, `/tmp` | node-local SSD array (ext4, also `/`) | 1.4 TB per node | 427 / 797 / 1458 / 1035 MB/s with 1 / 4 / 16 / 64 streams |
 | `/dev/shm` | RAM | 378 GB | memory speed; needed by the simulation at 2048^3 |
 
@@ -194,6 +194,11 @@ grep "successfully written" /storage/shadab/runs/test512/run.<job>.log   # stall
 ```
 
 ## 6. What staging buys at the current NFS speed
+
+Measured at 512^3 (HDF5 gzip 9, 2.4 GiB per snapshot): 370 s stall writing straight to NFS, 280 s
+staged (the same as writing to RAM); each snapshot was drained in about 95 s during the run.
+The remaining 280 s is the single-threaded HDF5/gzip writer, which Phases 1-3 replace.
+
 
 With NFS at about 25-30 MB/s in total, a 166 GB production snapshot needs about 1.5-1.8 h to copy.
 The simulation no longer waits for it, but the drain must finish before the next snapshot fills the

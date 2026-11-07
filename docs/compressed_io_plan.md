@@ -40,7 +40,7 @@ Option B to test offline (decision experiment, not a commitment): Lagrangian (ID
    - Time single-thread `gzip -1` on a float32 dump to test whether gzip alone explains 30 MB/s.
    - 512^3 baseline run: write to NFS and to `/dev/shm`, compare, to separate software cost from storage cost.
    - `h5cc -showconfig | grep -i thread`; find out which patch adds gzip.
-   Exit: written table of ceilings and the identified bottleneck.
+   Exit: written table of ceilings and the identified bottleneck. (Results: section 10.)
 1. Offline prototype (Python/numba) on real 512^3 Gadget snapshots at 3 redshifts: bytes per particle per stream (positions, velocities, IDs), max and rms error, Option A vs Option B, ID coding variants. Verify the decoder against `SnapshotReader`.
    Exit: chosen scheme, bytes per particle, error no worse than the current pipeline.
 2. C/C++ codec library with no pkdgrav3 dependency (quantizers, bit-packers, ID coder, block index) plus round-trip unit tests.
@@ -81,7 +81,8 @@ Probe job on node4 (inside PBS) plus login-node probes:
   - node-local `/var/tmp`: 427 / 797 / 1458 / 1035 MB/s for 1 / 4 / 16 / 64 streams (job 2536379).
   - NFS `/storage`: 28 MB/s (1 stream), 25 MB/s (4 streams) (job 2536378; a pawna build was downloading to /storage at the same time). More streams do not help: the total is capped at about 25-30 MB/s, which by itself explains production's 30 MB/s.
   - Links are 10 GbE (1.25 GB/s), so the cap is the NFS server side or other users' load. Ask the admins: sync export? disks? nconnect?
-  - Home `/user`: pending (job ran out of wall time; rerun with a smaller total).
+  - NFS `/storage`, 8 GB per row (jobs 2536391): 28 MB/s (16 streams), 33 MB/s (64 streams).
+  - Home `/user` (NFS from the login node), 8 GB per row (jobs 2536390/2536391): 270 / 325 / 379-395 / 426-488 MB/s for 1 / 4 / 16 / 64 streams. 8 GB may partly sit in the login node's cache if the export is async, so treat this as an upper bound; still about 10x `/storage`.
 - Consequence: a single 166 GB snapshot needs about 1.5-1.8 h on NFS whatever we do in pkdgrav3. Staging removes it from the simulation's critical path; compression shortens the background copy. The 20x stall target can only be met with staging (or a faster NFS).
 
 Staging design (decided: separate drain process first; in-process copy only if measurements show interference):
@@ -95,3 +96,22 @@ Staging design (decided: separate drain process first; in-process copy only if m
 - Usage, job script and examples: [running_on_pawna.md](running_on_pawna.md) (`tools/staging/run_staged.pbs`).
 - Risks: node failure loses snapshots not yet drained (checkpoints are safe); the copy competes with the run's MPI/NFS traffic (to be measured at 512^3 on pawna); PBS kill at walltime can interrupt a copy (the `.part` file is left, the local original is kept).
 - In-process alternative (later, only if needed): a low-priority pthread in pkdgrav3 that copies between steps; it knows exactly when writes finish and can pause during communication-heavy phases, but needs code in pkdgrav3 and shares the process's failure modes.
+
+## 10. Phase 0 results (2026-11-07)
+512^3 (134M particles), our 3.5.1 build, 64 threads, `mpirun -np 1`, node3/node4. Time = pkdgrav3's
+"Output file has been successfully written, Wallclock" per snapshot, which is the simulation stall.
+HDF5 = stock 3.5.1 (shuffle + gzip 9 + Fletcher32), 2.59 GB per snapshot; Tipsy = raw, 4.83 GB.
+
+| Snapshot written to | HDF5 gzip 9 | Tipsy |
+|---|---|---|
+| NFS `/storage` | 370 s | 183-209 s (23-26 MB/s) |
+| `/dev/shm` (RAM) | 277-287 s | 18.2 s (265 MB/s) |
+| node-local SSD + drain (job 2536385) | 279-290 s | not run |
+
+- Staging works at 512^3: stall equals the RAM case; the drain copied each 2.41 GiB snapshot in 92-101 s (25-27 MB/s, the NFS ceiling) and finished before the next snapshot; all 4 drained, local disk cleaned, peak RSS unchanged (24.7 GB).
+- Two bottlenecks, both large:
+  1. **Software**: the single writer thread. Even raw Tipsy into RAM is 265 MB/s; HDF5 with gzip 9 is 15x slower (about 19 MB/s of raw data). At 2048^3 (64x) that is about 20 min (Tipsy) and 5 h (gzip 9) of stall from software alone.
+  2. **NFS `/storage`**: 25-33 MB/s in total for 1-64 streams; Tipsy to NFS runs exactly at that rate. Links are 10 GbE, so the limit is the server or its load.
+- Storage ceilings: node-local SSD 0.4-1.5 GB/s (best at 16 streams); home 0.27-0.49 GB/s (upper bound); `/storage` 0.03 GB/s.
+- Implication: per-thread parallel compression (Phases 1-3) removes bottleneck 1; staging removes bottleneck 2 from the stall; compression shortens the background copy. Home is a possible faster destination (36 TB free; shared) to discuss.
+- Not yet measured: production gzip level 1 at 512^3 (`H5LEVEL=1`), standalone `gzip -1` speed on a float32 dump.
