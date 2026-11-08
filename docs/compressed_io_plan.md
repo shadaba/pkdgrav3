@@ -115,3 +115,51 @@ HDF5 = stock 3.5.1 (shuffle + gzip 9 + Fletcher32), 2.59 GB per snapshot; Tipsy 
 - Storage ceilings: node-local SSD 0.4-1.5 GB/s (best at 16 streams); home 0.27-0.49 GB/s (upper bound); `/storage` 0.03 GB/s.
 - Implication: per-thread parallel compression (Phases 1-3) removes bottleneck 1; staging removes bottleneck 2 from the stall; compression shortens the background copy. Home is a possible faster destination (36 TB free; shared) to discuss.
 - Not yet measured: production gzip level 1 at 512^3 (`H5LEVEL=1`), standalone `gzip -1` speed on a float32 dump.
+
+## 11. Phase 1 results (2026-11-08, offline prototype `tools/snapcomp_proto/`)
+Data: our own pkdgrav3 3.5.1 runs on the Mac, 128^3, production cosmology and accuracy settings,
+2LPT ICs at z=49, snapshots at z=3, 1, 0, in two boxes: 200 Mpc/h (production box, realistic large-scale
+flows) and 12.5 Mpc/h (production mass resolution, realistic halo interiors).
+
+Findings about the data:
+- IDs are Lagrangian lattice indices, id = (iz*N + iy)*N + ix (rms displacement 2.1 cells at z=3 with this
+  mapping vs 7.4 for others). Open item closed.
+- Files are in pkdgrav3 memory order, not ID order (no Reorder() in this path).
+- HDF5 `Time` is code time; a = 1/(1+z). Velocity conversion verified against Zel'dovich (slope 1.02).
+
+Quantizers (identical for A and B, so errors are identical): positions with step L/(256 N) (the uint8 offset
+in a mean-spacing cell of the Gadget scheme), velocities with step dv = 1 km/s (max error 0.5 km/s).
+
+Bytes per particle, zstd level 3, all round trips exact:
+
+| Box, z | A: blocks of 2^18 in file order | B: ID order, Lorenzo, implicit IDs | B without prediction |
+|---|---|---|---|
+| 200, z=3 | 7.65 (pos 3.35, vel 3.64, id 0.66) | 5.95 | 7.24 |
+| 200, z=1 | 8.16 (3.34, 3.89, 0.93) | 7.45 | 7.84 |
+| 200, z=0 | 8.38 (3.29, 4.01, 1.08) | 8.00 | 8.25 |
+| 12.5, z=3 | 7.43 (3.30, 3.02, 1.10) | 6.44 | 7.32 |
+| 12.5, z=1 | 7.81 (3.22, 3.27, 1.32) | 7.46 | 8.01 |
+| 12.5, z=0 | 7.91 (3.17, 3.37, 1.38) | 8.01 | 8.37 |
+
+References: raw float32 + uint64 = 32 B; stock HDF5 (gzip 9) 19.8-20.0 B; lossless float + zstd 20.4-20.6 B;
+production 2048^3 gzip-1 file: 166 GB / 2048^3 = 19.3 B.
+
+Sensitivity (Option A, z=0): each halving of dv adds 0.35-0.4 B; each doubling of position resolution adds
+0.4-0.5 B. dv = 0.5 / 1 / 2 / 4 km/s -> 8.72 / 8.38 / 8.03 / 7.61 B (200 Mpc/h box); sub = 128 / 256 / 512 /
+1024 -> 8.01 / 8.38 / 8.92 / 9.30 B.
+
+ID coding (Option A): sorting each cell's particles by ID and storing ID differences within a cell
+(`delta_in_cell`) wins at z <= 1 (0.9-1.4 B); Lagrangian-minus-Eulerian cell residuals win at z=3 in the big
+box (0.66 B); raw uint64 + zstd costs 1.0-1.8 B.
+
+Encode speed: zstd-3 runs at 500-1300 MB/s of quantized input per core, i.e. tens of millions of particles
+per second per thread; compression will not be the bottleneck in situ.
+
+Recommendation: **Option A**. It meets the 3x target (3.8-4.3x vs raw, about 2.4x smaller than today's
+gzip-1 HDF5) and fits the per-thread design. Option B is better only at high redshift (by up to 1.7 B at
+z=3, nothing at z=0) and needs particles in global ID order, i.e. the gather/Reorder() we want to remove.
+Expected 2048^3 snapshot: about 8 B x 8.6e9 = 69 GB (vs 166 GB today); 41 min to drain at 28 MB/s.
+
+To verify before Phase 2: (1) ID cost at larger N (displacements in cell units grow with N at fixed box;
+test 256^3 on the Mac and 512^3 on pawna); (2) the accuracy target: is dv = 1 km/s and L/(256 N) at least as
+good as the current Gadget 12-bit pipeline? (open item); (3) block size (2^16-2^20) and zstd level.
