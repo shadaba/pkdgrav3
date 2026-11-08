@@ -181,3 +181,13 @@ good as the current Gadget 12-bit pipeline? (open item); (3) block size (2^16-2^
 - Sahyadri for reference (arXiv 2601.07924): 400^3 grid, 8-bit offsets (dx = L/102400 = 1.95 kpc/h),
   12-bit counts with overflow, velocities 12 bit over +-5000 km/s (dv = 2.44 km/s), IDs uncompressed.
   Our default (L/(256*2048) = 0.38 kpc/h, 1 km/s) is 5x finer in position and 2.4x finer in velocity.
+- Option A at exactly Sahyadri's accuracy (dx = 1.95 kpc/h, i.e. 50 steps per mean spacing at production
+  mass resolution; dv = 2.44 km/s), 12.5 Mpc/h box, zstd-3, IDs lossless:
+  z=3 6.03, z=1 6.41, z=0 6.51 B/particle in one file (pos 2.31, vel 2.82, id 1.38 at z=0);
+  the 9 subsample files together 7.28 B/particle at z=0 (+12%).
+  Sahyadri's files (paper section 2.1.2: 56 GB without IDs, 85 GB with, for 2048^3) are about 6.5 + 3.4 =
+  9.9 B/particle. Same accuracy, all subsamples: about 26% smaller, with lossless IDs and no +-5000 km/s
+  velocity clip. Projected 2048^3 snapshot with subsamples: about 63 GB.
+- Parameters (Phase 3) should take the position step as a length (kpc/h) and the velocity step in km/s,
+  so presets are easy: "sahyadri" = 1.95 kpc/h, 2.44 km/s.
+- Note for the paper: section 2.1.2 says "ten subsamples" but lists nine percentages (they sum to 100).
