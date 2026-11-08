@@ -163,3 +163,21 @@ Expected 2048^3 snapshot: about 8 B x 8.6e9 = 69 GB (vs 166 GB today); 41 min to
 To verify before Phase 2: (1) ID cost at larger N (displacements in cell units grow with N at fixed box;
 test 256^3 on the Mac and 512^3 on pawna); (2) the accuracy target: is dv = 1 km/s and L/(256 N) at least as
 good as the current Gadget 12-bit pipeline? (open item); (3) block size (2^16-2^20) and zstd level.
+
+## 12. Subsamples and user-chosen accuracy (requirements for Phases 2-3, 2026-11-08)
+- Accuracy is chosen by the user in the run's parameter file (position step as steps per mean
+  inter-particle spacing, velocity step in km/s, block size, zstd level), with defaults
+  sub = 256, dv = 1 km/s. The values are stored in each file header so readers need nothing else.
+- Subsamples as in Sahyadri: disjoint percentages that sum to 100 (default 1, 3, 5, 9, 10, 12, 15, 20,
+  25), one file set per subsample, so users download only what they need and the large ones can be
+  deleted. Sahyadri's `create_subsamples()` (sahyadri-sandbox `scripts/post-process/Nbody_Compression.py`)
+  shuffles the array index with `np.random.seed(0)`; that needs a global permutation (about 69 GB at
+  2048^3) and cannot be done in situ. In situ, each particle's subsample is decided from a hash of its
+  ID (splitmix64 with a seed), so every thread decides alone and membership is the same in every
+  snapshot. Memberships differ from existing Sahyadri files.
+- Cost (prototype `run_subsamples.py`, Option A, 128^3, z=0): the 9 subsample files together take 10%
+  more than one file (9.19 vs 8.38 B/particle in the 200 Mpc/h box; 8.69 vs 7.91 at 12.5 Mpc/h). The
+  1% file costs about 10 B/particle, the 25% file about 9. All subsample round trips exact.
+- Sahyadri for reference (arXiv 2601.07924): 400^3 grid, 8-bit offsets (dx = L/102400 = 1.95 kpc/h),
+  12-bit counts with overflow, velocities 12 bit over +-5000 km/s (dv = 2.44 km/s), IDs uncompressed.
+  Our default (L/(256*2048) = 0.38 kpc/h, 1 km/s) is 5x finer in position and 2.4x finer in velocity.

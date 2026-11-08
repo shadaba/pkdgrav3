@@ -256,3 +256,27 @@ def option_B_plain(s, X, V, Q, sub, level=3):
     pos = sum(nbytes([z.enc(zigzag(D[:, d]))]) for d in range(3)) / N**3
     vel = sum(nbytes([z.enc(zigzag(Vo[:, d]))]) for d in range(3)) / N**3
     return dict(pos=pos, vel=vel, id=0.0, total=pos + vel)
+
+
+# ---------------------------------------------------------------------------------------------
+# Subsamples (Sahyadri-style disjoint percentages), decided per particle from its ID
+# ---------------------------------------------------------------------------------------------
+SAHYADRI_FRACTIONS = (1, 3, 5, 9, 10, 12, 15, 20, 25)
+
+
+def splitmix64(x, seed=0):
+    z = x.astype(np.uint64) + np.uint64(0x9E3779B97F4A7C15) * np.uint64(seed + 1)
+    with np.errstate(over="ignore"):
+        z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    return z ^ (z >> np.uint64(31))
+
+
+def subsample_of(ids, fractions=SAHYADRI_FRACTIONS, seed=0):
+    """Index of the subsample each particle belongs to. Depends only on (ID, seed), so every thread can
+    decide alone and a particle stays in the same subsample in every snapshot. Percentages must sum to 100.
+    (Sahyadri's create_subsamples() instead shuffles 0..N-1 with numpy seed 0, which needs a global
+    permutation and cannot be done in situ; memberships therefore differ from existing Sahyadri files.)"""
+    assert abs(sum(fractions) - 100) < 1e-9
+    u = (splitmix64(ids, seed) >> np.uint64(11)).astype(np.float64) / 2.0**53
+    return np.searchsorted(np.cumsum(fractions) / 100.0, u, side="right")
