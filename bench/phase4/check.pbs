@@ -1,0 +1,13 @@
+#!/bin/bash
+# Verify one compressed snapshot with pkc_check (IDs once, subsamples, lattice offsets; persistence with REF).
+# qsub -v PKD_IO_ROOT=...,SNAP=<prefix>[,REF=<prefix>] -l select=1:ncpus=32:mem=32gb -l walltime=3:00:00 check.pbs
+#PBS -N pkc_check
+#PBS -q workq
+#PBS -j oe
+W=${PKD_IO_ROOT:-/storage/shadab/pkdgrav3_io}
+J=${PBS_JOBID%%.*}
+mkdir -p $W/bench/logs
+exec > $W/bench/logs/check_$(basename $SNAP).$J.log 2>&1
+echo "host $(hostname) job $J $(date -Is) SNAP=$SNAP REF=${REF:-none}"
+/usr/bin/time -v $W/build_snapcomp/pkc_check --threads ${NCPUS:-32} ${REF:+--ref $REF} $SNAP; echo "check rc=$?"
+echo "done $(date -Is)"
