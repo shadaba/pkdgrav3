@@ -1,0 +1,42 @@
+#!/bin/bash
+# Phase 5: 512^3 (200 Mpc/h) to z = 0 with compressed + HDF5 snapshots of the same states, then:
+#   pkc_check on every snapshot (IDs once, subsamples; persistence of the 1% IDs against z = 3),
+#   test_pkcreader.py (Python reader vs HDF5) and pkc_to_gadget + Gadget read-back at z = 0.
+# Output stays in $W/bench/rs512/ for the Rockstar comparison (exact HDF5 vs .pkc).
+# qsub -v PKD_IO_ROOT=/storage/shadab/pkdgrav3_io/fresh -l select=1:ncpus=64:mem=160gb -l walltime=8:00:00 rs512.pbs
+#PBS -N rs512
+#PBS -q workq
+#PBS -j oe
+W=${PKD_IO_ROOT:-/storage/shadab/pkdgrav3_io}
+SRC=$W/pkdgrav3
+J=${PBS_JOBID%%.*}
+NTH=${NCPUS:-64}
+mkdir -p $W/bench/logs
+exec > $W/bench/logs/rs512.$J.log 2>&1
+source $SRC/bench/phase0/env_pawna.sh
+RD=$W/bench/rs512
+mkdir -p $RD && cd $RD
+echo "host $(hostname) job $J $(date -Is) threads=$NTH root=$W"
+(cd $SRC && git log -1 --format="source %h %s")
+cp $SRC/bench/phase5/rs512.par p.par
+cp $SRC/examples/euclid_z0_transfer_combined.dat .
+/usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH $W/build/pkdgrav3 -sz $NTH p.par > run.$J.log 2> time.$J.log
+echo "pkdgrav3 rc=$? $(date -Is)"
+grep -a -E "Maximum resident|Elapsed" time.$J.log
+grep -a -E "^Writing .* format|Compressed .* particles|successfully written" run.$J.log
+
+snaps=$(ls snap.?????.done | sed 's/\.done$//' | sort)
+first=$(echo "$snaps" | head -1)
+for s in $snaps; do
+  if [ $s = $first ]; then $W/build_snapcomp/pkc_check --threads $NTH $s
+  else $W/build_snapcomp/pkc_check --threads $NTH --ref $first $s; fi
+  echo "check $s rc=$?"
+done
+last=$(echo "$snaps" | tail -1)
+G=/var/tmp/shadab_rs512_$J; mkdir -p $G; trap 'rm -rf $G' EXIT
+/usr/bin/time -f "pkc_to_gadget %e s, %M kB" $W/build_snapcomp/pkc_to_gadget --threads $NTH $last $G/$last
+echo "pkc_to_gadget rc=$?"
+/usr/bin/time -f "test_pkcreader %e s, %M kB" $W/venv/bin/python $SRC/tools/pkcreader/test_pkcreader.py $last $G/$last
+echo "test_pkcreader rc=$?"
+ls -la $RD | head -40; du -sh $RD
+echo "done $(date -Is)"
