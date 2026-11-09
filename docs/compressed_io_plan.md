@@ -191,3 +191,22 @@ good as the current Gadget 12-bit pipeline? (open item); (3) block size (2^16-2^
 - Parameters (Phase 3) should take the position step as a length (kpc/h) and the velocity step in km/s,
   so presets are easy: "sahyadri" = 1.95 kpc/h, 2.44 km/s.
 - Note for the paper: section 2.1.2 says "ten subsamples" but lists nine percentages (they sum to 100).
+
+### Phase 1 exit (2026-11-09)
+Block size (Option A, Sahyadri accuracy, z=0, 12.5 / 200 Mpc/h): 4096: 6.61 / 7.28; 16384: 6.55 / 7.21;
+65536: 6.59 / 7.19; 262144: 6.51 / 7.07; 1048576: 6.50 / 7.03 B/particle. Default 65536 (+1-2% vs 2^18,
+4x less scratch memory, about 10 MB per thread, 2 GB for 192 threads).
+
+Decisions (user, 2026-11-08): subsample membership from an ID hash; default accuracy = Sahyadri
+(1.95 kpc/h, 2.44 km/s), overridable in the parameter file.
+
+Exit criteria:
+- Chosen scheme: Option A (per-thread blocks, cell sort, 8-bit-style offsets, quantized velocities,
+  per-block ID coding, zstd). Met.
+- Bytes per particle: 6.0-6.5 at Sahyadri accuracy, 7.3 with the 9 subsample files (z=0), vs about 9.9
+  for the current Sahyadri files and 19.3 for production gzip-1 HDF5. Met.
+- Error no worse than the current pipeline: identical quantization steps to Sahyadri (max 0.98 kpc/h,
+  1.22 km/s), lossless IDs, no velocity clipping. Met.
+- Not done: decoder check against `SnapshotReader` (our format differs; the Python reader is Phase 5),
+  and the ID cost at N > 128 (displacements in cell units grow with N). Carried into Phase 2 tests:
+  the C++ codec will be run on a 512^3 pawna snapshot.
