@@ -221,6 +221,15 @@ BlockEncoder::BlockEncoder(const Header& h) : p(new Impl) {
     ZSTD_CCtx_setParameter(p->cctx, ZSTD_c_checksumFlag, 1);
 }
 
+size_t BlockEncoder::scratch_bytes() const {
+    const Impl& s = *p;
+    size_t b = s.rec.capacity() * sizeof(Impl::Rec) + (s.X.capacity() + s.V.capacity()) * sizeof(int64_t) + s.tmp.capacity() * sizeof(uint64_t) +
+               s.planes.capacity() + s.out.capacity();
+    for (const auto* v : {&s.streams, &s.idbest, &s.idtry})
+        for (const auto& x : *v) b += x.data.capacity();
+    return b + ZSTD_sizeof_CCtx(s.cctx);
+}
+
 BlockEncoder::~BlockEncoder() {
     ZSTD_freeCCtx(p->cctx);
     delete p;

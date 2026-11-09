@@ -1,0 +1,75 @@
+#!/bin/bash -l
+# Phase 4 on pawna: N^3 run (qsub -v N=128|512|2048) with ordered-mode persistent IDs and compressed output.
+#   A (N <= 512 only): compressed + HDF5 from the same state on local SSD; compare_pkc_hdf5.py exact check.
+#   B: production setup: compressed, staged on local SSD, drained to NFS; peak memory (time -v and a 15 s
+#      sampler of pkdgrav3 RSS, node memory and swap); pkc_check on every drained snapshot (IDs once,
+#      subsamples, lattice offsets) and persistence against the first snapshot.
+# Set size with qsub -l (e.g. -l select=1:ncpus=192:mem=750gb -l walltime=20:00:00 for 2048^3).
+#PBS -N p4
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=96gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+W=${PKD_IO_ROOT:-/storage/shadab/pkdgrav3_io}; export PKD_IO_ROOT=$W
+SRC=$W/pkdgrav3
+N=${N:?set N}; NTH=${NTH:-${NCPUS:-64}}
+L=$(python3 -c "print(200*$N/2048)")
+RD=$W/bench/p4_$N
+mkdir -p $W/bench/logs $RD
+exec > $W/bench/logs/p4_$N.$J.log 2>&1
+source $SRC/bench/phase0/env_pawna.sh
+LD=/var/tmp/${USER}_p4_${N}_$J
+mkdir -p $LD
+trap 'rm -rf $LD' EXIT
+echo "host $(hostname) job $J $(date -Is) N=$N L=$L threads=$NTH root=$W"
+(cd $SRC && git log -1 --format="source %h %s")
+free -g | head -3; df -h /var/tmp | tail -1
+RUN="mpirun --bind-to none -np 1 -x PYTHONPATH $W/build/pkdgrav3 -sz $NTH"
+mkpar() { sed -e "s/@N@/$N/" -e "s/@L@/$L/" $SRC/bench/phase4/p4.par.in > $1; }
+
+memsample() { # $1 = pid to follow, $2 = output file
+  while kill -0 $1 2>/dev/null; do
+    p=$(pgrep -u $USER -x pkdgrav3 | tail -1); r=0; [ -n "$p" ] && r=$(ps -o rss= -p $p 2>/dev/null || echo 0)
+    echo "$(date +%s) rss_kb=${r// /} $(free -m | awk '/Mem:/{printf "node_used_mb=%s avail_mb=%s ",$3,$7} /Swap:/{printf "swap_used_mb=%s",$3}')"
+    sleep 15
+  done > $2
+}
+
+if [ "$N" -le 512 ]; then
+  echo "== A: compressed + HDF5 from the same state $(date -Is)"
+  mkdir -p $LD/A && cd $LD/A && mkpar p.par && echo "bCompAlsoStandard = True" >> p.par
+  cp $SRC/examples/euclid_z0_transfer_combined.dat .
+  /usr/bin/time -v $RUN p.par > run.log 2> time.log; echo "A pkdgrav3 rc=$?"
+  grep -E "Maximum resident|Elapsed" time.log
+  grep -E "^Writing .* format|successfully written" run.log
+  $W/venv/bin/python $SRC/tools/snapcomp_proto/compare_pkc_hdf5.py snap.000??; echo "A compare rc=$?"
+  cd / && rm -rf $LD/A
+fi
+
+echo "== B: compressed, staged on local SSD, drained to NFS $(date -Is)"
+cd $RD && rm -rf snapshots && mkpar p.par
+echo "achIoPath = \"$LD/stage/current/{name}.{step:05d}{type}\"" >> p.par
+cp $SRC/examples/euclid_z0_transfer_combined.dat .
+python3 $SRC/tools/staging/pkd_drain.py --stage $LD/stage --dest $RD/snapshots --init-only
+/usr/bin/time -v $RUN p.par > run.$J.log 2> time.$J.log &
+PKD=$!
+memsample $PKD $RD/mem.$J.log &
+nice -n 19 ionice -c 3 python3 $SRC/tools/staging/pkd_drain.py --stage $LD/stage --dest $RD/snapshots --log $RD/run.$J.log \
+     --pid $PKD --min-free-gb 200 --poll 10 --report $RD/drain.$J.log
+echo "B drain rc=$?"; wait $PKD; echo "B pkdgrav3 rc=$? $(date -Is)"
+grep -E "Maximum resident|Elapsed" time.$J.log
+awk '{split($2,a,"="); if (a[2]>m) m=a[2]; split($5,s,"="); if (s[2]>w) w=s[2]; if (NR==1) w0=s[2]} END {printf "sampler: peak pkdgrav3 RSS %.1f GB; swap used %.1f GB at start, %.1f GB peak\n", m/1048576, w0/1024, w/1024}' $RD/mem.$J.log
+grep -E "^Writing .* format|Compressed .* particles|scratch memory|successfully written" run.$J.log
+grep -E "drained|current ->|ERROR|LEFT|all drained" drain.$J.log
+first=$(ls $RD/snapshots/*.done 2>/dev/null | head -1); ls $RD/snapshots | sed -n '1,3p'
+snaps=$(ls $RD/snapshots/*.s01.0.pkc | sed 's/\.s01\.0\.pkc$//' | sort)
+f0=$(echo "$snaps" | head -1)
+for s in $snaps; do
+  if [ "$s" = "$f0" ]; then $W/build_snapcomp/pkc_check --threads $NTH $s
+  else $W/build_snapcomp/pkc_check --threads $NTH --ref $f0 $s; fi
+  echo "check rc=$?"
+done
+du -sh $RD/snapshots
+echo "done $(date -Is)"

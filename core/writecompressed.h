@@ -16,12 +16,14 @@
 #include "TraversePST.h"
 
 struct WriteCompressedStats {
-    std::uint64_t nWritten = 0; // particles written
-    std::uint64_t nSkipped = 0; // non-dark particles (not written)
-    std::uint64_t nBytes = 0;   // compressed block bytes
-    double dEncode = 0;         // thread-seconds in the encoder (sum)
-    double dWrite = 0;          // thread-seconds in appends (sum)
-    double dMaxThread = 0;      // slowest thread, seconds
+    std::uint64_t nWritten = 0;    // particles written
+    std::uint64_t nSkipped = 0;    // non-dark particles (not written)
+    std::uint64_t nBytes = 0;      // compressed block bytes
+    double dEncode = 0;            // thread-seconds in the encoder (sum)
+    double dWrite = 0;             // thread-seconds in appends (sum)
+    double dMaxThread = 0;         // slowest thread, seconds
+    std::uint64_t nScratch = 0;    // writer scratch bytes, summed over threads
+    std::uint64_t nScratchMax = 0; // largest per-thread scratch
     WriteCompressedStats& operator+=(const WriteCompressedStats& r) {
         nWritten += r.nWritten;
         nSkipped += r.nSkipped;
@@ -29,6 +31,8 @@ struct WriteCompressedStats {
         dEncode += r.dEncode;
         dWrite += r.dWrite;
         dMaxThread = std::max(dMaxThread, r.dMaxThread);
+        nScratch += r.nScratch;
+        nScratchMax = std::max(nScratchMax, r.nScratchMax);
         return *this;
     }
 };

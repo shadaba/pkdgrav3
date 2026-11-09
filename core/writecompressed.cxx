@@ -166,6 +166,8 @@ int ServiceWriteCompressed::Service(PST pst, void* vin, int nIn, void* vout, int
             flush();
             if (release(path) && k + 1 == in.nPercents) write_marker(in.achPrefix, in.nPercents, mdl->Proc());
         }
+        out.nScratch = enc.scratch_bytes() + bp.capacity() * sizeof(double) + bv.capacity() * sizeof(float) + bi.capacity() * sizeof(uint64_t);
+        out.nScratchMax = out.nScratch;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "ERROR: compressed output on thread %d: %s\n", mdl->Self(), e.what());
         std::fflush(stderr);

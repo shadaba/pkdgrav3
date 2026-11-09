@@ -37,8 +37,10 @@ def load(path):
         g = f["PartType1"]
         x = g["Coordinates"][:]
         v = g["Velocities"][:]
-        ids = g["ParticleIDs"][:]
-        hdf5_bytes = {k: g[k].id.get_storage_size() for k in ("Coordinates", "Velocities", "ParticleIDs")}
+        # Ordered mode (bMemUnordered=False, no bMemParticleID): no ID column; rows are sorted by iOrder,
+        # so the row number is the persistent ID.
+        ids = g["ParticleIDs"][:] if "ParticleIDs" in g else np.arange(len(x), dtype=np.uint64)
+        hdf5_bytes = {k: g[k].id.get_storage_size() for k in ("Coordinates", "Velocities", "ParticleIDs") if k in g}
     n = int(round(len(ids) ** (1 / 3)))
     assert n**3 == len(ids), "expect a full N^3 lattice"
     a = 1.0 / (1.0 + float(h["Redshift"]))  # header "Time" is pkdgrav3 code time, not a

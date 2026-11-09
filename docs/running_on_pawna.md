@@ -31,16 +31,52 @@ The links are 10 GbE, so the NFS ceiling comes from the server side or other use
 network. Questions for the admins: is `/storage` exported `sync`; what disks back it; is `nconnect`
 possible.
 
-## 2. Building (once, and after pulling changes)
+## 2. Setting up from scratch (from GitHub)
+
+Everything lives in one root directory of your choice (called `$ROOT` below; for example
+`/storage/$USER/pkdgrav3_io`). Nothing from an existing build is needed.
+
+### 2a. One command
 
 ```bash
 ssh pawna
-cd /storage/shadab/pkdgrav3_io/pkdgrav3
-git pull --ff-only
-bash -l bench/phase0/compile_pawna.sh            # about 10-15 min on NFS
-CLEAN=1 bash -l bench/phase0/compile_pawna.sh    # full rebuild, keeps downloaded deps
-qsub bench/phase0/smoke32.pbs                    # 1-minute 32^3 check inside PBS
+git clone -b feature/compressed-output https://github.com/shadaba/pkdgrav3.git /tmp/$USER-pkd-setup
+bash /tmp/$USER-pkd-setup/tools/pawna/setup_pawna.sh /storage/$USER/pkdgrav3_io      # 20-40 min
+rm -rf /tmp/$USER-pkd-setup
+qsub -v PKD_IO_ROOT=/storage/$USER/pkdgrav3_io /storage/$USER/pkdgrav3_io/pkdgrav3/bench/phase0/smoke32.pbs
+cat /storage/$USER/pkdgrav3_io/bench/logs/p0_smoke32.<job>.log                       # expect rc=0
 ```
+
+### 2b. The same, step by step
+
+```bash
+ROOT=/storage/$USER/pkdgrav3_io
+mkdir -p $ROOT/bench/logs && cd $ROOT
+# 1. source (the fork, branch with compressed output; never push to upstream)
+git clone -b feature/compressed-output https://github.com/shadaba/pkdgrav3.git pkdgrav3
+(cd pkdgrav3 && git submodule update --init)          # EOSlib, ANEOSmaterial
+# 2. Python: system 3.10 with the system NumPy 1.21 (its headers are the ones the compiler finds)
+python3 -m venv --system-site-packages venv
+venv/bin/python -m pip install "Cython>=3.0" "dill>=0.3.6" tomli "h5py<3.12" zstandard
+# 3. build pkdgrav3 -> $ROOT/build/pkdgrav3, snapcomp tools -> $ROOT/build_snapcomp/, gzip shim
+PKD_IO_ROOT=$ROOT bash -l pkdgrav3/bench/phase0/compile_pawna.sh
+```
+
+What `compile_pawna.sh` does (see the script): `source bench/phase0/env_pawna.sh` (module
+`openmpi-5.0.1`, unset the Intel MPI paths, `PYTHONPATH` to the venv), then
+`cmake -S pkdgrav3 -B build -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE=$ROOT/venv/bin/python`,
+`cmake --build build -j 16`, the same for `pkdgrav3/io/snapcomp` into `build_snapcomp`, and `make` in
+`tools/h5shim`. pkdgrav3 downloads cpptrace, libdwarf and zstd during the first cmake; snapcomp downloads
+zstd for its tools (pawna has no zstd headers). Dependencies used from the system: GCC 11, CMake 3.22,
+HDF5 1.10.7, GSL 2.7, FFTW 3, Boost 1.74, hwloc.
+
+Updating later: `cd $ROOT/pkdgrav3 && git pull --ff-only && PKD_IO_ROOT=$ROOT bash -l bench/phase0/compile_pawna.sh`
+(`CLEAN=1` in front for a full rebuild of pkdgrav3).
+
+Job scripts in this repository take the root from `PKD_IO_ROOT` (default `/storage/shadab/pkdgrav3_io`):
+`qsub -v PKD_IO_ROOT=$ROOT,... script.pbs`. In your own job scripts: `export PKD_IO_ROOT=$ROOT;
+source $ROOT/pkdgrav3/bench/phase0/env_pawna.sh`, then
+`mpirun --bind-to none -np 1 -x PYTHONPATH $ROOT/build/pkdgrav3 -sz $NCPUS run.par`.
 
 The login node is for builds and quick probes only; runs go through PBS.
 
@@ -55,6 +91,26 @@ Pitfalls that cost time (all handled by the scripts):
 - `.gitignore` ignores `build*`, so scripts must not be named `build_*`.
 - PBS `-o` copy-back from compute nodes loses output here; every job script writes its own log with
   `exec > logfile`.
+
+### 2c. Persistent IDs without extra memory (use this for 2048^3)
+
+`bMemParticleID = True` grows every particle record from 48 to 56 bytes (+76 to +128 GB at 2048^3, which no
+longer fits a 755 GB node). Use ordered mode instead; the particle header then carries `iOrder`, a persistent
+ID, at no extra cost:
+
+```python
+bMemUnordered  = False   # particles keep iOrder (42-43 bits) in their 8-byte header
+bMemParticleID = False   # no separate 8-byte ID field
+```
+
+- `iOrder` is set from the initial conditions and moves with the particle; for pkdgrav3-generated ICs it is
+  the Lagrangian lattice index `(iz*N + iy)*N + ix`, exactly what `ParticleID` would hold.
+- Compressed output (`bCompressedOutput`) writes `iOrder` as the ID automatically and skips any re-sorting.
+- Standard HDF5/Tipsy output in ordered mode has no ID column: pkdgrav3 sorts particles by `iOrder`
+  (`Reorder()`) before writing, so the row number is the ID.
+- ICs read from a file: `iOrder` is the particle's row in the IC file. If the file's IDs are its row numbers
+  (0- or 1-based) this is the same thing; otherwise keep the IC file's ID column as the lookup table.
+- Measurements and the record layouts: [memory_persistent_ids.md](memory_persistent_ids.md).
 
 ## 3. I/O parameters that matter
 

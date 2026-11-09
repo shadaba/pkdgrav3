@@ -89,6 +89,9 @@ class BlockEncoder {
     /// Returns the block bytes, valid until the next call.
     const std::vector<uint8_t>& encode(size_t n, const double* pos, const float* vel, const uint64_t* ids);
 
+    /// Heap bytes held by this encoder (capacity of its buffers), for memory accounting.
+    size_t scratch_bytes() const;
+
     /// Bytes per particle of the last block, per stream group (pos, vel, id) and the ID coder used.
     struct Stats {
         size_t pos = 0, vel = 0, id = 0, total = 0;

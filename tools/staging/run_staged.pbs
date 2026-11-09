@@ -11,7 +11,8 @@
 #            `from PKDGRAV import restore` form makes pkdgrav3 run the whole simulation again
 #            from the ICs after the restart finishes)
 #   DEST     final snapshot directory on NFS                             [$RUNDIR/snapshots]
-#   BIN      pkdgrav3 executable                     [/storage/shadab/pkdgrav3_io/build/pkdgrav3]
+#   PKD_IO_ROOT  root of clone/build/venv (docs/running_on_pawna.md section 2) [/storage/shadab/pkdgrav3_io]
+#   BIN      pkdgrav3 executable                     [$PKD_IO_ROOT/build/pkdgrav3]
 #   ENVSH    script sourced to set up modules/env    [$SRC/bench/phase0/env_pawna.sh]
 #   NTH      worker threads (-sz)                                        [$NCPUS from PBS]
 #   STAGE    local staging dir; must not change between restarts    [/var/tmp/$USER_stage_<rundir name>]
@@ -30,8 +31,9 @@ set -u
 J=${PBS_JOBID%%.*}
 : "${RUNDIR:?set RUNDIR}"
 [ -n "${PAR:-}${RESTART:-}" ] || { echo "set PAR or RESTART"; exit 1; }
-SRC=/storage/shadab/pkdgrav3_io/pkdgrav3
-BIN=${BIN:-/storage/shadab/pkdgrav3_io/build/pkdgrav3}
+export PKD_IO_ROOT=${PKD_IO_ROOT:-/storage/shadab/pkdgrav3_io}
+SRC=$PKD_IO_ROOT/pkdgrav3
+BIN=${BIN:-$PKD_IO_ROOT/build/pkdgrav3}
 ENVSH=${ENVSH:-$SRC/bench/phase0/env_pawna.sh}
 NTH=${NTH:-${NCPUS:-64}}
 DEST=${DEST:-$RUNDIR/snapshots}

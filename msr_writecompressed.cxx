@@ -88,5 +88,7 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
                  "thread {mx:.2f} s\n",
                  "n"_a = out.nWritten, "mb"_a = out.nBytes / 1e6, "bpp"_a = out.nWritten ? double(out.nBytes) / out.nWritten : 0.0, "enc"_a = out.dEncode,
                  "app"_a = out.dWrite, "mx"_a = out.dMaxThread);
+    print_detail("Compressed output scratch memory: {tot:.1f} MB over all threads, {mx:.1f} MB per thread (freed after the write)\n",
+                 "tot"_a = out.nScratch / 1e6, "mx"_a = out.nScratchMax / 1e6);
     print_detail("Output file has been successfully written, Wallclock: {seconds:.5} secs.\n", "seconds"_a = dsec);
 }

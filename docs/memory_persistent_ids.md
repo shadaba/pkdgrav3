@@ -44,3 +44,24 @@ standard writer does in ordered mode before every snapshot.
 Caveat for ICs read from a file (production reads `snapshot_ics_000_v4corrected.hdf5`): `iOrder` is the
 particle's position in the IC file, not the ID stored in it. If the file's IDs are its row numbers (0- or
 1-based), the mapping is trivial; otherwise the IC file's ID column is the lookup table, needed once.
+
+## How to use option 1 (ordered mode)
+
+In the parameter file:
+
+```python
+bMemUnordered  = False
+bMemParticleID = False
+```
+
+Nothing else changes; the run does not need a rebuild. To check a run: compressed output with
+`pkc_check` (built in `build_snapcomp/`) on an early snapshot shows every particle within about a
+cell of the lattice point its ID names, and `--ref <earlier snapshot>` shows the same IDs in the same
+subsample with physical displacements; standard output: row i of the HDF5 file is the particle with
+`iOrder = i`. Results of these checks on pawna (128^3, 512^3, 2048^3) are in
+[compressed_io_plan.md](compressed_io_plan.md), Phase 4.
+
+Further saving, not yet validated for physics: `bMemIntegerPosition = True` (32-bit integer positions,
+resolution box/2^31, about 0.1 pc/h for 200 Mpc/h) takes the record to 32 bytes; measured -19.6 B/particle
+in total (-168 GB at 2048^3). Compare a 512^3 run with and without it (power spectrum, halo mass function)
+before using it in production.

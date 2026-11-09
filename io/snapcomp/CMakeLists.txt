@@ -52,6 +52,9 @@ if(SNAPCOMP_TESTS)
   add_executable(snapcomp_test tests/test_snapcomp.cxx)
   target_link_libraries(snapcomp_test snapcomp)
   add_test(NAME snapcomp_test COMMAND snapcomp_test ${CMAKE_CURRENT_BINARY_DIR})
+  # streaming verification of a compressed snapshot (IDs once, subsamples, lattice offsets, persistence)
+  add_executable(pkc_check tools/pkc_check.cxx)
+  target_link_libraries(pkc_check snapcomp)
 
   # HDF5 snapshot -> compressed files (with subsamples) -> decoded and verified; needs HDF5 C library
   find_package(HDF5 COMPONENTS C)

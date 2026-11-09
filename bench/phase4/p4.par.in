@@ -1,0 +1,36 @@
+# Phase 4: N^3 at production mass resolution (L = 200 * N / 2048 Mpc/h), production cosmology and accuracy.
+# Ordered mode: the persistent ID is iOrder (bMemUnordered = False, no bMemParticleID; see
+# docs/memory_persistent_ids.md). 6 steps; snapshots after step 1 (z = 45, particles still within about a
+# cell of their lattice point, which checks every ID), step 3 (z = 25) and step 6 (z = 12).
+from accuracy import classic_theta_switch, classic_replicas_switch
+achOutName      = "snap"
+achTfFile       = "euclid_z0_transfer_combined.dat"
+nGrid           = @N@
+dBoxSize        = @L@
+iLPT            = 2
+iSeed           = 314159265
+dRedFrom        = 49
+nSteps          = [1, 2, 3]
+dRedTo          = [45.0, 25.0, 12.0]
+iOutInterval    = 1000
+iCheckInterval  = 0
+h               = 0.6736
+dOmega0         = 0.3137721
+dLambda         = 0.6862279
+dSigma8         = 0.81
+dSpectral       = 0.965
+bComove         = True
+bPeriodic       = True
+bEwald          = True
+bEpsAccStep     = True
+bNewKDK         = True
+dEta            = 0.3
+dTheta          = classic_theta_switch()
+nReplicas       = classic_replicas_switch()
+bMemUnordered   = False
+bMemParticleID  = False
+bDoDensity      = False
+bOverwrite      = True
+bVDetails       = True
+bHDF5           = True
+bCompressedOutput = True
