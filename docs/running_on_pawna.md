@@ -148,7 +148,36 @@ qsub -v RUNDIR=$PWD,PAR=test512.par,BIN=/user/swarajit/apps_user/pkdgrav3_openmp
 ```
 (Read-only use of the production install; nothing there is modified.)
 
-### 4f. Options summary
+### 4f. Compressed parallel output (bCompressedOutput)
+
+Add to the parameter file (all but the first line are optional; values shown are the defaults):
+
+```python
+bCompressedOutput  = True
+dCompPosStep       = 1.95            # kpc/h, max position error is half of it
+dCompVelStep       = 2.44            # km/s,  max velocity error is half of it
+lstCompSubsamples  = [1, 3, 5, 9, 10, 12, 15, 20, 25]   # percent, sum 100; [100] = one file
+iCompSubsampleSeed = 0
+iCompBlockSize     = 65536           # particles per block (scratch about 150 B/particle per thread)
+iCompLevel         = 3               # zstd level
+```
+
+Every thread compresses its own particles and writes in parallel; nothing is gathered. Each snapshot
+becomes `<name>.s<percent>.<process>.pkc` (one file per subsample and MPI process) and a
+`<name>.done` marker per process once its files are complete. Checkpoints are unchanged.
+It works with staging (4a) as is: the drain copies `<name>.*` when it sees the marker.
+Dark matter only (other species are skipped with a warning). `bCompAlsoStandard = True` also writes
+the normal HDF5/Tipsy snapshot from the same state, for validation; do not combine it with staging.
+
+Reading (Python, numpy + zstandard): see `tools/snapcomp_proto/pkc_reader.py`:
+
+```python
+import sys; sys.path.insert(0, "/storage/shadab/pkdgrav3_io/pkdgrav3/tools/snapcomp_proto")
+from pkc_reader import read_snapshot, PKCFile
+pos, vel, ids = read_snapshot("snapshots/snap.00100", percents=[1])   # Mpc/h, km/s, uint64
+```
+
+### 4g. Options summary
 
 | Variable | Default | Meaning |
 |---|---|---|
