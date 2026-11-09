@@ -156,6 +156,7 @@ class MSR {
     double Read(std::string_view achInFile);
     void Checkpoint(int iStep, int nSteps, double dTime, double dDelta);
     void Write(std::string_view FileName, double dTime, int bCheckpoint);
+    void WriteCompressed(std::string_view FileName, double dTime); // msr_writecompressed.cxx
     void OutASCII(std::string_view File, int iType, int nDims, int iFileType);
     void OutArray(std::string_view File, int iType, int iFileType);
     void OutArray(std::string_view File, int iType);

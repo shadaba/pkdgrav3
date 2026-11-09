@@ -40,6 +40,7 @@
 #include "core/select.h"
 #include "core/fftsizes.h"
 #include "core/countspecies.h"
+#include "core/writecompressed.h"
 #include "core/removedeleted.h"
 #include "core/ignoresigbus.h"
 #include "core/decorator_reorder.h"
@@ -141,6 +142,7 @@ void* worker_init(MDL vmdl) {
     mdl->AddService<ServiceFftSizes>(pst);
     mdl->AddService<ServiceIgnoreSIGBUS>(pst);
     mdl->AddService<ServiceCountSpecies>(pst);
+    mdl->AddService<ServiceWriteCompressed>(pst);
     mdl->AddService<ServiceRemoveDeleted>(pst);
     mdl->AddService<ServiceFileSizes>(pst);
     mdl->AddService<ServiceRestore>(pst);

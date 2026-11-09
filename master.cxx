@@ -1328,6 +1328,11 @@ void MSR::Write(std::string_view FileName, double dTime, int bCheckpoint) {
     double dvFac, dExp;
     double dsec;
 
+    if (parameters.get_bCompressedOutput() && !bCheckpoint) {
+        WriteCompressed(FileName, dTime);
+        if (!parameters.get_bCompAlsoStandard()) return;
+    }
+
 #ifdef NAIVE_DOMAIN_DECOMP
     Reorder();
     ReorderDecorator();

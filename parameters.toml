@@ -460,6 +460,53 @@ flag="dv"
 default=false
 help="input/output double precision velocities (standard format only)"
 
+["I/O Parameters".bCompressedOutput]
+flag="comp"
+default=false
+help="write snapshots in the compressed parallel snapcomp format"
+docs='''
+Snapshots (not checkpoints) are written by every thread in parallel in the snapcomp format
+(docs/snapcomp_format.md): positions and velocities quantized to dCompPosStep and dCompVelStep,
+IDs lossless, zstd compressed, split into the subsamples of lstCompSubsamples. One file per subsample
+per MPI process, named ``<snapshot>.s<percent>.<process>.pkc``; achIoPath is honoured. Dark matter only.
+'''
+
+["I/O Parameters".dCompPosStep]
+flag="compdx"
+default=1.95
+help="compressed output: position step in kpc/h (max error is half of it)"
+
+["I/O Parameters".dCompVelStep]
+flag="compdv"
+default=2.44
+help="compressed output: velocity step in km/s (max error is half of it)"
+
+["I/O Parameters".lstCompSubsamples]
+flag="compsub"
+default=[1.0]
+omitted="[1,3,5,9,10,12,15,20,25]"
+help="compressed output: subsample percentages, must sum to 100 ([100] = one file)"
+
+["I/O Parameters".iCompSubsampleSeed]
+flag="compseed"
+default=0
+help="compressed output: seed of the ID hash that assigns subsamples"
+
+["I/O Parameters".iCompBlockSize]
+flag="compblock"
+default=65536
+help="compressed output: particles per block (per-thread scratch is about 150 bytes per particle)"
+
+["I/O Parameters".iCompLevel]
+flag="complevel"
+default=3
+help="compressed output: zstd level"
+
+["I/O Parameters".bCompAlsoStandard]
+flag="compstd"
+default=false
+help="compressed output: also write the standard (HDF5/Tipsy) snapshot, for validation (not with staging)"
+
 ["I/O Parameters".bDoSoftOutput]
 flag="softout"
 default=false
