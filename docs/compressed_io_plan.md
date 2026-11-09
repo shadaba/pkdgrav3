@@ -345,6 +345,23 @@ timers in the run log.
   memory to keep it. Fix: the writer now pushes each block to disk and drops it from the page cache
   (`sync_file_range` + `posix_fadvise(DONTNEED)`, Linux only), so writing a snapshot needs no extra RAM.
 
+### 2048^3, second attempt (job 2536432, node4 to itself, 2026-11-10), with the page-cache fix
+Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check ran as a separate job
+(`bench/phase4/check.pbs`, 32 threads, reading the drained files from NFS).
+- RSS 744 GiB from the first gravity step on, swap 25 GB (as in the first attempt).
+- Snapshot z = 45 (step 1): **stall 50.0 s** (production HDF5 ~2.5 h); 45,624 MB = **5.31 B/particle**
+  for 8.59e9 particles with 9 subsample files; writer scratch 2.14 GB over 192 threads (11.5 MB per
+  thread, 0.29% of the RSS). Encode 2258 s and append (write + flush to SSD) 3690 s summed over threads,
+  i.e. the stall is set by the local SSD at about 0.9 GB/s. No swap jump during the write.
+- Drain to NFS: 42.5 GiB in 2003 s (22 MB/s). Swap grew from 25 to 41 GB while it ran: the drain's
+  reads and NFS writes filled the page cache. Fixed afterwards in `pkd_drain.py` (fadvise DONTNEED on
+  both files, fdatasync every 256 MiB); the running job still used the old drain.
+- `pkc_check` z = 45: 8,589,934,592 IDs read, all distinct, none missing or out of range, all in the
+  right subsample; distance from own lattice point rms 2.52 cells, max 6.91 (random IDs: ~1024).
+  4 min 50 s, 1.3 GB RSS.
+- Time stepping: after z = 45 most particles are on rung 4 (16 full gravity passes of ~550 s per step),
+  so z = 25 is due about 08:30 and z = 12 about 15:00-16:00 IST.
+
 ## 16. Phase 5: readers (2026-11-10)
 - Python: `tools/pkcreader/pkcreader.py` (numpy + zstandard, from the spec only, one file).
   `PkcSnapshot(prefix)`: header values (redshift, scale, Lbox, npart, mpart, Om, Olam, hubble, percents),
