@@ -1,0 +1,63 @@
+# snapcomp: compressed parallel snapshot output (standalone; no pkdgrav3 headers).
+# Builds on its own (cmake -S io/snapcomp -B build) or via add_subdirectory() from pkdgrav3.
+cmake_minimum_required(VERSION 3.14)
+project(snapcomp CXX)
+
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+endif()
+
+# zstd: use an existing target (e.g. from pkdgrav3's fetched copy), else the system, else fetch it.
+if(NOT TARGET snapcomp_zstd)
+  find_package(zstd CONFIG QUIET)
+  if(TARGET zstd::libzstd_static)
+    add_library(snapcomp_zstd ALIAS zstd::libzstd_static)
+  elseif(TARGET zstd::libzstd_shared)
+    add_library(snapcomp_zstd ALIAS zstd::libzstd_shared)
+  else()
+    find_path(ZSTD_INCLUDE_DIR zstd.h)
+    find_library(ZSTD_LIBRARY NAMES zstd)
+    if(ZSTD_INCLUDE_DIR AND ZSTD_LIBRARY)
+      add_library(snapcomp_zstd INTERFACE)
+      target_include_directories(snapcomp_zstd INTERFACE ${ZSTD_INCLUDE_DIR})
+      target_link_libraries(snapcomp_zstd INTERFACE ${ZSTD_LIBRARY})
+    else()
+      message(STATUS "snapcomp: zstd not found, fetching v1.5.6")
+      include(FetchContent)
+      set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+      set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+      set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+      FetchContent_Declare(snapcomp_zstd_src
+        URL https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz
+        SOURCE_SUBDIR build/cmake)
+      FetchContent_MakeAvailable(snapcomp_zstd_src)
+      add_library(snapcomp_zstd INTERFACE)
+      target_link_libraries(snapcomp_zstd INTERFACE libzstd_static)
+      target_include_directories(snapcomp_zstd INTERFACE ${snapcomp_zstd_src_SOURCE_DIR}/lib)
+    endif()
+  endif()
+endif()
+
+add_library(snapcomp STATIC snapcomp.cxx)
+target_include_directories(snapcomp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(snapcomp PUBLIC snapcomp_zstd)
+set_target_properties(snapcomp PROPERTIES POSITION_INDEPENDENT_CODE ON)
+find_package(Threads REQUIRED)
+target_link_libraries(snapcomp PUBLIC Threads::Threads)
+
+option(SNAPCOMP_TESTS "Build snapcomp tests and tools" ${PROJECT_IS_TOP_LEVEL})
+if(SNAPCOMP_TESTS)
+  enable_testing()
+  add_executable(snapcomp_test tests/test_snapcomp.cxx)
+  target_link_libraries(snapcomp_test snapcomp)
+  add_test(NAME snapcomp_test COMMAND snapcomp_test ${CMAKE_CURRENT_BINARY_DIR})
+
+  # HDF5 snapshot -> compressed files (with subsamples) -> decoded and verified; needs HDF5 C library
+  find_package(HDF5 COMPONENTS C)
+  if(HDF5_FOUND)
+    add_executable(pkc_convert tools/pkc_convert.cxx)
+    target_include_directories(pkc_convert PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_link_libraries(pkc_convert snapcomp ${HDF5_LIBRARIES})
+  endif()
+endif()

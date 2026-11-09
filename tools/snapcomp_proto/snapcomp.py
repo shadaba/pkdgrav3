@@ -265,8 +265,8 @@ SAHYADRI_FRACTIONS = (1, 3, 5, 9, 10, 12, 15, 20, 25)
 
 
 def splitmix64(x, seed=0):
-    z = x.astype(np.uint64) + np.uint64(0x9E3779B97F4A7C15) * np.uint64(seed + 1)
-    with np.errstate(over="ignore"):
+    with np.errstate(over="ignore"):  # all arithmetic is mod 2^64 on purpose
+        z = x.astype(np.uint64) + np.uint64(0x9E3779B97F4A7C15) * np.uint64(seed + 1)
         z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
         z = (z ^ (z >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
     return z ^ (z >> np.uint64(31))
