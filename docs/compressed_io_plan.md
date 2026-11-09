@@ -239,3 +239,28 @@ exactly: IDs once, quantized positions identical, errors half a step, membership
 Speed (Mac M4 Pro, one thread, block 65536, zstd-3): encode 8-10 M particles/s, decode 44-46 M particles/s.
 8 threads: 56 M particles/s for one file (including all I/O). At 2048^3 on 192 threads: about 5 s of
 compression per snapshot.
+
+Pawna (job 2536419, node3, 2x EPYC 9654, gcc 11, zstd 1.5.6 fetched): all unit tests pass; one thread
+encodes 5.7 M particles/s and decodes 25 M/s. A 512^3 run at production mass resolution (50 Mpc/h, z = 49
+-> 0, 64 threads, 3 h 12 min, 26 GB peak RSS) gave HDF5 snapshots at z = 3, 1, 0, converted with 64
+threads to local SSD and verified (every particle once, max errors 0.98 kpc/h and 1.22 km/s):
+
+| 512^3, B/particle | z = 3 | z = 1 | z = 0 |
+|---|---|---|---|
+| 9 subsample files, Sahyadri accuracy | 7.34 | 7.77 | 7.95 |
+| single file, Sahyadri accuracy | 6.35 | 6.89 | 7.14 |
+| single file, 0.38 kpc/h and 1 km/s | 7.73 | 8.27 | 8.55 |
+
+Streams at z = 0 (9 files): pos 2.57, vel 3.17, id 2.22 B/particle (128^3 Mac: 2.52, 2.91, 1.94). IDs cost
+0.28 B more at 4x N per side, velocities 0.25 B more (stronger large-scale flows in the larger box).
+Expected at 2048^3 (another 4x): about 8.5-9 B/particle with subsamples, i.e. 73-77 GB per snapshot
+(Sahyadri format: 85 GB; production HDF5: 166 GB).
+Throughput: 64 threads compressed, split into 9 subsamples and wrote 134M particles in 1.6-2.2 s
+(61-84 M particles/s, 4.1-4.6 M particles/s per thread). Scaled to 2048^3 on 192 threads: about 45 s
+per snapshot, against 2.5 h today.
+
+### Phase 2 exit (2026-11-09)
+Codec library with no pkdgrav3 dependency (quantizers, bit/byte packing, three ID coders, block index,
+subsamples), file writer for many threads, reader, format spec, unit tests on Mac and pawna, independent
+Python reader, and verified round trips on real 128^3 and 512^3 pkdgrav3 snapshots. Done.
+Kept for Phase 3/5 work: 512^3 z = 0 subsample files in /storage/shadab/pkdgrav3_io/bench/p2_pkc (1 GB).
