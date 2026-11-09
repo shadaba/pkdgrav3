@@ -31,6 +31,7 @@ import time
 WRITING = re.compile(r"Writing (\S+) in \S+ format")
 WRITTEN = re.compile(r"Output file has been successfully written")
 CHUNK = 16 << 20  # 16 MiB copies: large sequential NFS writes
+FLUSH = 256 << 20  # write out and drop from the page cache every 256 MiB
 
 
 def now():
@@ -128,6 +129,11 @@ class Drainer:
         size = os.path.getsize(src)
         t0 = time.time()
         done = 0
+        # Keep the copy out of the page cache: on a node whose RAM is full with the simulation, cached
+        # snapshot data makes the kernel swap out simulation memory (seen at 2048^3). Drop what was
+        # read, and push written data out every FLUSH bytes and drop it too.
+        drop = getattr(os, "posix_fadvise", None)
+        flushed = 0
         with open(src, "rb") as fi, open(part, "wb") as fo:
             while True:
                 buf = fi.read(CHUNK)
@@ -135,6 +141,13 @@ class Drainer:
                     break
                 fo.write(buf)
                 done += len(buf)
+                if drop:
+                    drop(fi.fileno(), done - len(buf), len(buf), os.POSIX_FADV_DONTNEED)
+                    if done - flushed >= FLUSH:
+                        fo.flush()
+                        os.fdatasync(fo.fileno())
+                        drop(fo.fileno(), flushed, done - flushed, os.POSIX_FADV_DONTNEED)
+                        flushed = done
                 if self.a.bwlimit > 0:  # simple rate limit
                     ahead = done / (self.a.bwlimit * 2**20) - (time.time() - t0)
                     if ahead > 0:
