@@ -29,10 +29,17 @@ free -g | head -3; df -h /var/tmp | tail -1
 RUN="mpirun --bind-to none -np 1 -x PYTHONPATH $W/build/pkdgrav3 -sz $NTH"
 mkpar() { sed -e "s/@N@/$N/" -e "s/@L@/$L/" $SRC/bench/phase4/p4.par.in > $1; }
 
+SWAPLIMIT_MB=${SWAPLIMIT_MB:-30000}  # stop the run if node swap grows by more than this (thrashing guard)
 memsample() { # $1 = pid to follow, $2 = output file
+  local s0=$(free -m | awk '/Swap:/{print $3}')
   while kill -0 $1 2>/dev/null; do
     p=$(pgrep -u $USER -x pkdgrav3 | tail -1); r=0; [ -n "$p" ] && r=$(ps -o rss= -p $p 2>/dev/null || echo 0)
-    echo "$(date +%s) rss_kb=${r// /} $(free -m | awk '/Mem:/{printf "node_used_mb=%s avail_mb=%s ",$3,$7} /Swap:/{printf "swap_used_mb=%s",$3}')"
+    sw=$(free -m | awk '/Swap:/{print $3}')
+    echo "$(date +%s) rss_kb=${r// /} $(free -m | awk '/Mem:/{printf "node_used_mb=%s avail_mb=%s ",$3,$7}')swap_used_mb=$sw"
+    if [ $((sw - s0)) -gt $SWAPLIMIT_MB ]; then
+      echo "SWAP GUARD: swap grew by $((sw - s0)) MB (> $SWAPLIMIT_MB); stopping pkdgrav3" | tee -a /dev/stderr
+      pkill -u $USER -x pkdgrav3; break
+    fi
     sleep 15
   done > $2
 }
