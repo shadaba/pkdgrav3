@@ -1,0 +1,42 @@
+#!/bin/bash -l
+# Phase 2 on pawna: snapcomp unit tests, then a 512^3 run (z=49 -> 0, snapshots at z=3,1,0 on local SSD),
+# then each snapshot converted with 64 threads (9 Sahyadri subsamples, and a single file) and verified.
+# Keeps the compressed z=0 subsample files and the logs on NFS; deletes the HDF5 snapshots.
+#PBS -N p2_snapcomp512
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=96gb
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p2_snapcomp512.out
+set -u
+J=${PBS_JOBID%%.*}
+W=/storage/shadab/pkdgrav3_io
+SRC=$W/pkdgrav3
+exec > $W/bench/logs/p2_snapcomp512.$J.log 2>&1
+source $SRC/bench/phase0/env_pawna.sh
+L=/var/tmp/shadab_p2_$J
+KEEP=$W/bench/p2_pkc
+mkdir -p $L $KEEP
+trap 'rm -rf $L' EXIT
+echo "host $(hostname) job $J $(date -Is)"; lscpu | grep "Model name"
+echo "== unit tests"; $W/build_snapcomp/snapcomp_test $L; echo "tests rc=$?"
+cd $L
+cp $SRC/bench/phase2/snapcomp512.par $SRC/examples/euclid_z0_transfer_combined.dat .
+echo "== pkdgrav3 512^3 $(date -Is)"
+/usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH $W/build/pkdgrav3 -sz 64 snapcomp512.par > run.log 2> time.log
+echo "pkdgrav3 rc=$? $(date -Is)"; grep -E "Elapsed|Maximum resident" time.log
+grep -E "successfully written" run.log
+cp run.log $W/bench/logs/p2_snapcomp512.$J.run.log
+for s in snap.000??; do
+  echo "== $s: 9 subsamples, 64 threads"
+  $W/build_snapcomp/pkc_convert --threads 64 --verify $s $L/$s
+  echo "== $s: single file, 64 threads"
+  $W/build_snapcomp/pkc_convert --threads 64 --percents 100 --verify $s $L/${s}_single
+  echo "== $s: single file, finer accuracy (0.38 kpc/h, 1 km/s)"
+  $W/build_snapcomp/pkc_convert --threads 64 --percents 100 --dx 0.381 --dv 1 $s $L/${s}_fine
+  ls -la $s
+  rm -f $L/${s}_single.* $L/${s}_fine.*
+done
+last=$(ls snap.000?? | tail -1)
+cp $L/$last.s*.pkc $KEEP/ && echo "kept $(ls $KEEP | wc -l) files of $last in $KEEP"
+echo "done $(date -Is)"
