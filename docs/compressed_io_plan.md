@@ -264,3 +264,43 @@ Codec library with no pkdgrav3 dependency (quantizers, bit/byte packing, three I
 subsamples), file writer for many threads, reader, format spec, unit tests on Mac and pawna, independent
 Python reader, and verified round trips on real 128^3 and 512^3 pkdgrav3 snapshots. Done.
 Kept for Phase 3/5 work: 512^3 z = 0 subsample files in /storage/shadab/pkdgrav3_io/bench/p2_pkc (1 GB).
+
+## 14. Phase 3: integration in pkdgrav3 (2026-11-09)
+`bCompressedOutput = True` makes every snapshot (not checkpoints) go through `MSR::WriteCompressed`
+(`msr_writecompressed.cxx`) and `ServiceWriteCompressed` (`core/writecompressed.{h,cxx}`): all leaf
+threads run at once, each compresses its own particles (one pass per subsample, one block of scratch) and
+appends to one file per subsample shared by the threads of its process; the last thread closes each file and,
+after the last one, writes `<name>.done`. No gathering, no `Reorder()`, no HDF5. File names follow
+`BuildIoName`, so `achIoPath` and staging work unchanged. Parameters: `dCompPosStep` (1.95 kpc/h),
+`dCompVelStep` (2.44 km/s), `lstCompSubsamples` (Sahyadri), `iCompSubsampleSeed`, `iCompBlockSize`,
+`iCompLevel`, and `bCompAlsoStandard` (also write HDF5/Tipsy from the same state, for validation).
+Edits to existing files: one branch in `MSR::Write`, one declaration in `master.h`, one service registration
+in `main.cxx`, CMake (library + two sources; reuses cpptrace's zstd), and the new parameter entries.
+
+Tests:
+- Mac, 64^3 (6.25 Mpc/h), 8 threads, `bCompAlsoStandard`: snapshots at z = 3, 1, 0 checked against the HDF5
+  of the same step with `compare_pkc_hdf5.py` (spec-only reader): every ID once, correct subsample, errors
+  half a step. 9 files: 6.84 / 7.12 / 7.20 B/particle; one file: 5.90 / 6.21 / 6.29.
+- Mac, MPI, 2 processes x 4 threads: 18 files per snapshot (2 writers), all checks pass.
+- Mac, staged to a local directory with the drain: all files drained via the `.done` marker (verbose off)
+  and via log lines (verbose on). Bug found on pawna and fixed: with both triggers the drain left the marker
+  behind and exited 2 (data was complete).
+- pawna, job 2536426, 512^3 (50 Mpc/h), `-np 1`, 64 threads, snapshots at z = 20, 10, 5:
+
+| | z = 20 | z = 10 | z = 5 |
+|---|---|---|---|
+| A: compressed write (stall), local SSD | 1.44 s | 1.90 s | 1.35 s |
+| A: HDF5 (stock gzip 9), same run, same state, local SSD | 250.6 s | 256.6 s | 281.9 s |
+| A: compare with that HDF5 | OK | OK | OK |
+| B: compressed, staged (stall) | 2.71 s | 1.90 s | (similar) |
+| B: drain to NFS while the run continues | 54 s | 28 s | 23 s |
+| size (9 subsample files) | 5.89 B | 6.43 B | 6.98 B |
+
+  130-200x less stall than HDF5 on the same disk; peak RSS 26.2-26.7 GB (Phase 2 run without the writer:
+  26.0 GB). Drained snapshots read back complete (134,217,728 unique IDs each).
+- IDs are persistent: same ID set at z = 3 and z = 0, same-ID displacement median 1.4 Mpc/h (12.5 box) /
+  5.4 Mpc/h (200 box) vs 6.0 / 98.5 for random pairs; stored losslessly; subsample membership depends on the
+  ID only, so a particle stays in its subsample in every snapshot (consistent-trees works per subsample).
+
+Exit criterion status: 512^3 on pawna `-np 1` done; MPI tested on the Mac (2 processes). Not done: 1024^3
+(needs approval, above the 512^3 limit) and pegasus (no access from this setup).

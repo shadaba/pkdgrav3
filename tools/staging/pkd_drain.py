@@ -101,6 +101,15 @@ class Drainer:
     def add(self, path, marker=None):
         path = os.path.basename(path)  # located later in local/ or dest/ (symlink may have flipped)
         if path in self.seen:
+            # Seen before (e.g. from the log); a marker arriving later must not be left behind.
+            if marker:
+                for k, (p, m) in enumerate(self.pending):
+                    if p == path:
+                        self.pending[k] = (p, marker)
+                        break
+                else:  # already drained
+                    if os.path.exists(marker):
+                        os.unlink(marker)
             return
         self.seen.add(path)
         self.pending.append((path, marker))
