@@ -329,4 +329,18 @@ SSD, drained to NFS, memory sampled every 15 s, `pkc_check` on every drained sna
 | same-ID displacement z = 45 -> 12, max | 0.50 Mpc/h | 1.11 Mpc/h (random pairs ~24) |
 
 No swap was added by any run (the node already had 15-159 GB of swap in use by other jobs).
-2048^3: job 2536431 (192 threads, 750 GB, 20 h), queued for a free node.
+### 2048^3, first attempt (job 2536431, node2 to itself, 192 threads, 2026-11-10)
+Measured with the job's 15 s sampler (`ps -o rss` of pkdgrav3, `free -m` for the node) and pkdgrav3's own
+timers in the run log.
+- Peak pkdgrav3 RSS **746.0 GiB** (ordered mode, persistent IDs = iOrder). The run without persistent IDs
+  measured 742 GB earlier and the run with bMemParticleID 870 GB: persistent IDs now cost about nothing.
+- The node has 755 GiB, so the run is at the edge: about 1.5-2 GB free from the first gravity step on;
+  swap grew to 25-27 GB and stayed flat. All 192 cores stayed busy (PBS cpupercent 18933), i.e. no thrashing.
+- Timings: IC (2LPT) 350 s; first gravity 603 s; later gravity 328-604 s; domain decomposition 27-51 s;
+  tree 14-39 s.
+- At the first snapshot (z = 45) swap jumped by 7 GB within 15 s while the compressed files were written
+  to the local SSD, and the job's swap guard (stop if swap grows by more than 30 GB) killed pkdgrav3 in the
+  middle of the write. No snapshot was completed, so no ID checks yet.
+- Cause: the written data sat in the page cache, and on a full node the kernel swapped out simulation
+  memory to keep it. Fix: the writer now pushes each block to disk and drops it from the page cache
+  (`sync_file_range` + `posix_fadvise(DONTNEED)`, Linux only), so writing a snapshot needs no extra RAM.

@@ -510,6 +510,12 @@ void FileWriter::append(const void* data, size_t size, uint32_t n_particles, uin
     check(fd_ >= 0, "append after close");
     uint64_t off = next_.fetch_add(size);
     pwrite_all(data, size, off);
+#if defined(__linux__)
+    // Write the block out now and drop it from the page cache. Without this, a large snapshot fills the
+    // page cache and the kernel swaps out simulation memory to make room (seen at 2048^3 on a full node).
+    if (::sync_file_range(fd_, off_t(off), off_t(size), SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER) == 0)
+        ::posix_fadvise(fd_, off_t(off), off_t(size), POSIX_FADV_DONTNEED);
+#endif
     std::lock_guard<std::mutex> lock(mtx_);
     index_.push_back({off, size, n_particles, thread});
 }
@@ -539,6 +545,9 @@ void FileWriter::close() {
     h_.pack(hb.data());
     pwrite_all(hb.data(), hb.size(), 0);
     if (::fsync(fd_) != 0) throw std::system_error(errno, std::generic_category(), "snapcomp: fsync " + path_);
+#if defined(__linux__)
+    ::posix_fadvise(fd_, 0, 0, POSIX_FADV_DONTNEED);
+#endif
     int fd = fd_;
     fd_ = -1;
     if (::close(fd) != 0) throw std::system_error(errno, std::generic_category(), "snapcomp: close " + path_);

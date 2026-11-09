@@ -49,7 +49,7 @@ if [ "$N" -le 512 ]; then
   mkdir -p $LD/A && cd $LD/A && mkpar p.par && echo "bCompAlsoStandard = True" >> p.par
   cp $SRC/examples/euclid_z0_transfer_combined.dat .
   /usr/bin/time -v $RUN p.par > run.log 2> time.log; echo "A pkdgrav3 rc=$?"
-  grep -E "Maximum resident|Elapsed" time.log
+  grep -a -E "Maximum resident|Elapsed" time.log
   grep -E "^Writing .* format|successfully written" run.log
   $W/venv/bin/python $SRC/tools/snapcomp_proto/compare_pkc_hdf5.py snap.000??; echo "A compare rc=$?"
   cd / && rm -rf $LD/A
@@ -66,7 +66,7 @@ memsample $PKD $RD/mem.$J.log &
 nice -n 19 ionice -c 3 python3 $SRC/tools/staging/pkd_drain.py --stage $LD/stage --dest $RD/snapshots --log $RD/run.$J.log \
      --pid $PKD --min-free-gb 200 --poll 10 --report $RD/drain.$J.log
 echo "B drain rc=$?"; wait $PKD; echo "B pkdgrav3 rc=$? $(date -Is)"
-grep -E "Maximum resident|Elapsed" time.$J.log
+grep -a -E "Maximum resident|Elapsed" time.$J.log
 awk '{split($2,a,"="); if (a[2]>m) m=a[2]; split($5,s,"="); if (s[2]>w) w=s[2]; if (NR==1) w0=s[2]} END {printf "sampler: peak pkdgrav3 RSS %.1f GB; swap used %.1f GB at start, %.1f GB peak\n", m/1048576, w0/1024, w/1024}' $RD/mem.$J.log
 grep -E "^Writing .* format|Compressed .* particles|scratch memory|successfully written" run.$J.log
 grep -E "drained|current ->|ERROR|LEFT|all drained" drain.$J.log
