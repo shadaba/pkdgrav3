@@ -304,3 +304,29 @@ Tests:
 
 Exit criterion status: 512^3 on pawna `-np 1` done; MPI tested on the Mac (2 processes). Not done: 1024^3
 (needs approval, above the 512^3 limit) and pegasus (no access from this setup).
+
+## 15. Phase 4: full-size tests with persistent IDs at no memory cost (2026-11-09)
+Setup: a fresh root on pawna (`/storage/shadab/pkdgrav3_io/fresh`) built from GitHub with
+`tools/pawna/setup_pawna.sh` exactly as in docs/running_on_pawna.md section 2a (setup and smoke test passed).
+Runs: `bench/phase4/p4.pbs` with `p4.par.in`: production mass resolution (L = 200 N/2048 Mpc/h), production
+cosmology/accuracy, 2LPT ICs from pkdgrav3 at z = 49, 6 steps, snapshots at z = 45 / 25 / 12, **ordered mode
+(`bMemUnordered = False`, no `bMemParticleID`: ID = iOrder)**, compressed output (Sahyadri accuracy, 9
+subsamples). Part A (N <= 512): compressed + HDF5 from the same state, exact comparison. Part B: staged on local
+SSD, drained to NFS, memory sampled every 15 s, `pkc_check` on every drained snapshot (+ persistence vs z = 45).
+
+| | 128^3 (32 thr, job 2536429) | 512^3 (64 thr, job 2536430) |
+|---|---|---|
+| A: compressed vs HDF5, same state | OK (3/3) | OK (3/3), max err 0.9773 kpc/h incl. float32 of HDF5 |
+| A: stall compressed / HDF5 (gzip 9) | 0.04-0.55 s / 4.0-4.4 s | 1.56-1.69 s / 216-230 s |
+| B: stall (staged) | 0.04 s | 1.33-1.66 s |
+| B: size (9 files), z = 45 / 25 / 12 | 4.88 / 5.30 / 5.84 B | 5.31 / 5.72 / 6.28 B |
+| B: drain to NFS | 7-8 s | 19-24 s (31-35 MB/s) |
+| peak RSS (time -v) | 5.8 GB | 25.0 GB |
+| writer scratch | 6.2 MB/thread | 14.0 MB/thread (0.88 GB total) |
+| IDs once, right subsample (all 3) | yes, 2,097,152 | yes, 134,217,728 |
+| z = 45: max distance from own lattice point | 1.81 cells | 4.09 cells (random IDs: ~N/2) |
+| 1% subsample same IDs at z = 45, 25, 12 | yes (21,250) | yes (1,342,802) |
+| same-ID displacement z = 45 -> 12, max | 0.50 Mpc/h | 1.11 Mpc/h (random pairs ~24) |
+
+No swap was added by any run (the node already had 15-159 GB of swap in use by other jobs).
+2048^3: job 2536431 (192 threads, 750 GB, 20 h), queued for a free node.
