@@ -1,0 +1,60 @@
+#!/bin/bash -l
+# Phase 3 exit test on pawna (-np 1, 64 threads), 512^3:
+#  A) bCompressedOutput + bCompAlsoStandard: compressed and HDF5 snapshots from the same state, written
+#     to node-local SSD; compare_pkc_hdf5.py checks every particle; both stall times from the log.
+#  B) bCompressedOutput only, staged on local SSD with the drain to NFS (the production setup).
+#PBS -N p3_rt512
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=96gb
+#PBS -l walltime=03:00:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p3_rt512.out
+set -u
+J=${PBS_JOBID%%.*}
+W=/storage/shadab/pkdgrav3_io
+SRC=$W/pkdgrav3
+exec > $W/bench/logs/p3_rt512.$J.log 2>&1
+source $SRC/bench/phase0/env_pawna.sh
+L=/var/tmp/shadab_p3_$J
+mkdir -p $L
+trap 'rm -rf $L' EXIT
+echo "host $(hostname) job $J $(date -Is)"
+RUN="mpirun --bind-to none -np 1 -x PYTHONPATH $W/build/pkdgrav3 -sz 64"
+
+echo "== A: compressed + HDF5 from the same state $(date -Is)"
+mkdir -p $L/A && cd $L/A
+cp $SRC/bench/phase3/roundtrip512.par p.par; echo "bCompAlsoStandard = True" >> p.par
+cp $SRC/examples/euclid_z0_transfer_combined.dat .
+/usr/bin/time -v $RUN p.par > run.log 2> time.log; echo "pkdgrav3 rc=$?"
+grep -E "Maximum resident|Elapsed" time.log
+grep -E "^Writing .* format|Compressed .* particles|successfully written" run.log
+cp run.log $W/bench/logs/p3_rt512.$J.A.run.log
+$W/venv/bin/python $SRC/tools/snapcomp_proto/compare_pkc_hdf5.py snap.000?? ; echo "compare rc=$?"
+ls -la | grep snap | head -30; du -ch snap.000?? | tail -1; du -ch snap.*.pkc | tail -1
+cd $L && rm -rf $L/A
+
+echo "== B: compressed only, staged on local SSD, drained to NFS $(date -Is)"
+RD=$W/bench/p3_rt512_B; rm -rf $RD; mkdir -p $RD && cd $RD
+cp $SRC/bench/phase3/roundtrip512.par p.par
+echo "achIoPath = \"$L/stage/current/{name}.{step:05d}{type}\"" >> p.par
+cp $SRC/examples/euclid_z0_transfer_combined.dat .
+python3 $SRC/tools/staging/pkd_drain.py --stage $L/stage --dest $RD/snapshots --init-only
+/usr/bin/time -v $RUN p.par > run.log 2> time.log &
+PKD=$!
+nice -n 19 ionice -c 3 python3 $SRC/tools/staging/pkd_drain.py --stage $L/stage --dest $RD/snapshots --log $RD/run.log \
+     --pid $PKD --min-free-gb 200 --poll 5 --report $RD/drain.log
+echo "drain rc=$?"; wait $PKD; echo "pkdgrav3 rc=$?"
+grep -E "Maximum resident|Elapsed" time.log
+grep -E "^Writing .* format|Compressed .* particles|successfully written" run.log
+grep -E "drained|current ->|ERROR|LEFT|all drained" drain.log
+ls $RD/snapshots | wc -l; du -sh $RD/snapshots
+$W/venv/bin/python - <<PY
+import sys; sys.path.insert(0, "$SRC/tools/snapcomp_proto")
+import numpy as np
+from pkc_reader import read_snapshot
+for s in ("00004", "00008", "00012"):
+    x, v, i = read_snapshot("$RD/snapshots/snap." + s)
+    print(s, len(i), "particles, unique", len(np.unique(i)) == len(i) == 512**3)
+PY
+rm -rf $RD/snapshots
+echo "done $(date -Is)"
