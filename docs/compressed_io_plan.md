@@ -210,3 +210,32 @@ Exit criteria:
 - Not done: decoder check against `SnapshotReader` (our format differs; the Python reader is Phase 5),
   and the ID cost at N > 128 (displacements in cell units grow with N). Carried into Phase 2 tests:
   the C++ codec will be run on a 512^3 pawna snapshot.
+
+## 13. Phase 2: codec library (2026-11-09)
+`io/snapcomp/` (C++17, zstd, POSIX; no pkdgrav3 headers), format in [snapcomp_format.md](snapcomp_format.md).
+- `BlockEncoder` (one per thread, reusable buffers): quantize, sort by (cell, ID), streams for cell keys,
+  counts, offsets, velocities and IDs (raw / delta in cell / Lagrangian residual, smallest kept), zstd with
+  checksums. `decode_block` checks every size and checksum and throws on corruption.
+- `FileWriter`: one file shared by all threads of a process; `append()` reserves the offset with an atomic
+  counter and writes with `pwrite` (no lock on the data path); `close()` writes the block index, trailer
+  and final header, then fsync. `FileReader` rejects files without a trailer (writer crashed).
+- `SubsampleTable`: Sahyadri percentages by splitmix64 hash of the ID; identical to the Python version.
+- `choose_grid`: cells of the mean particle spacing, steps per cell from the requested position step.
+- Standalone build: `cmake -S io/snapcomp -B build`; uses system zstd or fetches zstd 1.5.6.
+
+Tests (Mac, `snapcomp_test`, all pass): subsample hash vs numpy golden values (10 IDs + counts over 10^6
+IDs); header round trip; exact round trips with error <= half a step for lattice particles, random 64-bit
+IDs, all particles in one cell, box edges, sub = 1, odd block sizes; 4/4 byte corruptions and a truncated
+block detected; 8 threads appending to one file, every particle read back once; truncated file rejected.
+
+Real snapshots (Mac, `pkc_convert --verify`, 128^3, Sahyadri accuracy, 8 threads, 9 subsample files):
+all particles back exactly once, max errors 0.98 kpc/h and 1.22 km/s (half a step) for all 6 snapshots.
+12.5 Mpc/h box: 6.95 / 7.32 / 7.40 B/particle at z = 3 / 1 / 0 (Python prototype with 2^18 blocks over the
+whole sample: 7.28 at z = 0; the difference is per-thread partial blocks for the small subsamples).
+Single file: 6.599 B/particle, identical to the prototype (6.59).
+Independent Python reader (`tools/snapcomp_proto/pkc_reader.py`, from the spec only) decodes the C++ files
+exactly: IDs once, quantized positions identical, errors half a step, membership equal to the hash.
+
+Speed (Mac M4 Pro, one thread, block 65536, zstd-3): encode 8-10 M particles/s, decode 44-46 M particles/s.
+8 threads: 56 M particles/s for one file (including all I/O). At 2048^3 on 192 threads: about 5 s of
+compression per snapshot.
