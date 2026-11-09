@@ -55,6 +55,9 @@ if(SNAPCOMP_TESTS)
   # streaming verification of a compressed snapshot (IDs once, subsamples, lattice offsets, persistence)
   add_executable(pkc_check tools/pkc_check.cxx)
   target_link_libraries(pkc_check snapcomp)
+  # compressed snapshot -> Gadget-2 binary files for Rockstar (stopgap until Rockstar reads .pkc)
+  add_executable(pkc_to_gadget tools/pkc_to_gadget.cxx)
+  target_link_libraries(pkc_to_gadget snapcomp)
 
   # HDF5 snapshot -> compressed files (with subsamples) -> decoded and verified; needs HDF5 C library
   find_package(HDF5 COMPONENTS C)

@@ -344,3 +344,24 @@ timers in the run log.
 - Cause: the written data sat in the page cache, and on a full node the kernel swapped out simulation
   memory to keep it. Fix: the writer now pushes each block to disk and drops it from the page cache
   (`sync_file_range` + `posix_fadvise(DONTNEED)`, Linux only), so writing a snapshot needs no extra RAM.
+
+## 16. Phase 5: readers (2026-11-10)
+- Python: `tools/pkcreader/pkcreader.py` (numpy + zstandard, from the spec only, one file).
+  `PkcSnapshot(prefix)`: header values (redshift, scale, Lbox, npart, mpart, Om, Olam, hubble, percents),
+  `read(fields, subsamples, units, dtype)` decoding blocks on threads into preallocated arrays,
+  `read_block()` in SnapshotReader style ((3, n) for pos/vel), `iter_blocks()` for streaming. Files are
+  memory-mapped. The prototype's `pkc_reader.py` is now a shim to it.
+- Rockstar, stopgap: `io/snapcomp/tools/pkc_to_gadget` (C++, threads) writes Gadget-2 files
+  (float32 Mpc/h in [0, L), v_pec/sqrt(a), 8-byte IDs, mass in 1e10 Msun/h from Omega_m L^3 / n, at most
+  2^24 particles per file so every record stays below 2^31 bytes) and prints the Rockstar settings.
+- Tests (Mac, `tools/pkcreader/test_pkcreader.py`, 64^3 snapshot at z = 3 with HDF5 written from the same
+  state): every ID once and found in HDF5; position error 0.9766 kpc/h and velocity error 1.22 km/s
+  (half a step); read / read_block / iter_blocks give the same particles in the same order; 1% subsample
+  is exactly the hashed set; Gadget files (1 and 6 files): totals, header, mass, IDs, positions and
+  v*sqrt(a) equal to the reader's. All pass.
+- Not done here: running Rockstar on converted files. Building Rockstar from the downloaded upstream
+  source on the Mac was refused by the Claude Code permission check; needs the user's approval or the
+  pawna build. Native Rockstar reading is planned in a separate session:
+  [rockstar_pkc_session_prompt.md](rockstar_pkc_session_prompt.md).
+- Sahyadri-sandbox: the reader is meant to sit next to `scripts/post-process/readers.py`; not copied
+  there yet (that repo belongs to a-paranjape; needs a branch and the owner's agreement).

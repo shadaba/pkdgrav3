@@ -225,13 +225,23 @@ It works with staging (4a) as is: the drain copies `<name>.*` when it sees the m
 Dark matter only (other species are skipped with a warning). `bCompAlsoStandard = True` also writes
 the normal HDF5/Tipsy snapshot from the same state, for validation; do not combine it with staging.
 
-Reading (Python, numpy + zstandard): see `tools/snapcomp_proto/pkc_reader.py`:
+Reading (Python, numpy + zstandard): `tools/pkcreader/pkcreader.py` (one file, see its README):
 
 ```python
-import sys; sys.path.insert(0, "/storage/shadab/pkdgrav3_io/pkdgrav3/tools/snapcomp_proto")
-from pkc_reader import read_snapshot, PKCFile
-pos, vel, ids = read_snapshot("snapshots/snap.00100", percents=[1])   # Mpc/h, km/s, uint64
+import sys; sys.path.insert(0, "/storage/shadab/pkdgrav3_io/pkdgrav3/tools/pkcreader")
+from pkcreader import PkcSnapshot
+s = PkcSnapshot("snapshots/snap.00100")       # s.redshift, s.Lbox, s.npart, s.mpart, s.Om, ...
+d = s.read(subsamples=[1])                    # pos (n,3) Mpc/h in [0, L), vel (n,3) km/s, ids
+pos = s.read_block("pos")                     # SnapshotReader style (3, n)
 ```
+
+Checking a snapshot without loading it (IDs once, subsamples, persistence against an earlier one):
+`build_snapcomp/pkc_check [--ref snapshots/snap.00010] snapshots/snap.00100`.
+
+Rockstar (until it reads .pkc itself): `build_snapcomp/pkc_to_gadget snapshots/snap.00100 gadget/snap.00100`
+writes Gadget-2 files (`.0`, `.1`, ..., at most 2^24 particles each) and prints the Rockstar settings
+(`FILE_FORMAT = "GADGET2"`, `NUM_BLOCKS`, `GADGET_ID_BYTES = 8`, ...). The files take 32 B/particle
+(275 GB at 2048^3), so convert one snapshot at a time to local disk.
 
 ### 4g. Options summary
 
