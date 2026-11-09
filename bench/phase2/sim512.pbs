@@ -1,0 +1,30 @@
+#!/bin/bash -l
+# Phase 2 (safe version): 512^3 run to z=0 in a run directory on NFS, with checkpoints, so a wall-time kill
+# loses nothing. pkdgrav3 checkpoints and stops itself after iWallRunTime minutes; resubmit with
+# RESTART=<checkpoint> to continue. Snapshots (HDF5) stay in RUNDIR for pkc_convert (convert512.pbs).
+#PBS -N p2_sim512
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=96gb
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkdgrav3_io/bench/logs/p2_sim512.out
+set -u
+J=${PBS_JOBID%%.*}
+W=/storage/shadab/pkdgrav3_io
+SRC=$W/pkdgrav3
+RUNDIR=$W/bench/sim512
+exec > $W/bench/logs/p2_sim512.$J.log 2>&1
+source $SRC/bench/phase0/env_pawna.sh
+mkdir -p $RUNDIR && cd $RUNDIR
+cp -n $SRC/examples/euclid_z0_transfer_combined.dat .
+if [ -n "${RESTART:-}" ]; then
+  printf 'import PKDGRAV\nPKDGRAV.restore("%s", iWallRunTime=690)\n' "$RESTART" > p.$J.par
+else
+  cp $SRC/bench/phase2/snapcomp512.par p.$J.par
+  printf 'iCheckInterval = 20\niWallRunTime = 690\n' >> p.$J.par   # minutes; walltime 12 h
+fi
+echo "host $(hostname) job $J $(date -Is) restart=${RESTART:-none}"
+/usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH $W/build/pkdgrav3 -sz 64 p.$J.par > run.$J.log 2> time.$J.log
+echo "pkdgrav3 rc=$? $(date -Is)"; grep -E "Elapsed|Maximum resident" time.$J.log
+grep -E "Writing output|successfully written|Writing checkpoint" run.$J.log
+ls -la $RUNDIR
