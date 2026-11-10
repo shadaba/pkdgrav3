@@ -1,0 +1,82 @@
+#!/bin/bash -l
+# pegasus: is node-local staging needed, or is writing straight to /data (Lustre) good enough? (debug queue,
+# 4 nodes x 32 cores, 8 MPI processes (one per socket) x 16 threads.)
+# 1. Disks: which node-local file systems exist (df -T on every node); dd write speed (O_DIRECT, 8 GiB) to the
+#    largest node-local one and to /data with 1 writer, and to /data with 32 writers (8 per node, 2 GiB each).
+# 2. 512^3, L = 50 Mpc/h (production mass resolution), z = 49 -> 12 in 6 steps, snapshots at z = 45, 25, 12
+#    (bench/phase4/p4.par.in), compressed with the potential (step 100):
+#    A: straight to /data, iCompWriteThrough auto (page cache), plus HDF5 of the same states (serial writer);
+#    B: compressed to node-local disk, then each node copies its files to /data (timed), as a drain would;
+#    C: straight to /data with iCompWriteThrough = 1 (each block on disk before the next: disk-bound stall).
+# qsub -v PKD_IO_ROOT=/data/project/hpc2502016/shadab/pkdgrav3_io bench/pegasus/io512.pbs
+#PBS -N pkd_io512
+#PBS -q debug
+#PBS -l select=4:ncpus=32:mpiprocs=2:mem=200gb
+#PBS -l place=scatter
+#PBS -l walltime=03:00:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+W=${PKD_IO_ROOT:-/data/project/hpc2502016/shadab/pkdgrav3_io}; export PKD_IO_ROOT=$W
+SRC=$W/pkdgrav3
+D=$W/bench/io512_$J
+mkdir -p $W/bench/logs; exec > $W/bench/logs/io512.$J.log 2>&1
+source $SRC/tools/pegasus/env_pegasus.sh
+NODES=$(sort -u $PBS_NODEFILE); NN=$(echo "$NODES" | wc -l)
+echo "job $J $(date -Is) nodes: $(echo $NODES)"; (cd $SRC && git log -1 --format="source %h %s")
+MPI="mpirun --hostfile $PBS_NODEFILE --bind-to none $mpirun_pegasus_args"
+ONEPERNODE="$MPI -np $NN --map-by ppr:1:node"
+mkdir -p $D
+
+echo "== 1. node-local file systems (df -T, excluding lustre/nfs/tmpfs/overlay)"
+$ONEPERNODE bash -c 'echo "$(hostname): $(df -T -BG 2>/dev/null | awk "NR>1 && \$2 !~ /lustre|nfs|tmpfs|devtmpfs|overlay|squashfs|autofs/ {print \$7\"(\"\$2\",\"\$5\" free)\"}" | tr "\n" " ")"' 2>/dev/null
+# choose the node-local directory: largest local fs among the usual scratch places, on the first node
+LOC=""
+for c in /local /localscratch /scratch_local /lscratch /tmp /var/tmp; do
+  [ -d $c ] && [ -w $c ] || continue
+  t=$(df -T $c | awk 'NR==2{print $2}'); a=$(df -BG $c | awk 'NR==2{print $4+0}')
+  case $t in lustre|nfs*|tmpfs|overlay) continue;; esac
+  echo "candidate $c: $t, ${a} GB free"
+  if [ -z "$LOC" ] || [ $a -gt ${LA:-0} ]; then LOC=$c; LA=$a; fi
+done
+echo "node-local choice: ${LOC:-none} (${LA:-0} GB free on $(hostname))"
+L=$LOC/${USER}_io512_$J
+echo "== dd, 8 GiB, O_DIRECT, 1 writer"
+if [ -n "$LOC" ]; then
+  mkdir -p $L; dd if=/dev/zero of=$L/dd.bin bs=16M count=512 oflag=direct 2>&1 | tail -1 | sed "s|^|local $LOC: |"; rm -f $L/dd.bin
+fi
+dd if=/dev/zero of=$D/dd.bin bs=16M count=512 oflag=direct 2>&1 | tail -1 | sed "s|^|/data: |"; rm -f $D/dd.bin
+echo "== dd, /data, 32 writers (8 per node) x 2 GiB, O_DIRECT"
+t0=$(date +%s.%N)
+$MPI -np $((8*NN)) --map-by ppr:8:node bash -c "dd if=/dev/zero of=$D/dd.\$OMPI_COMM_WORLD_RANK bs=16M count=128 oflag=direct 2>/dev/null" 2>/dev/null
+t1=$(date +%s.%N); echo "/data aggregate: $((8*NN*2)) GiB in $(echo "$t1 - $t0" | bc) s = $(echo "$((8*NN*2))*1024/($t1 - $t0)" | bc) MiB/s"
+rm -f $D/dd.*
+
+mkpar() { mkdir -p $D/$1; cp $SRC/examples/euclid_z0_transfer_combined.dat $D/$1/
+  sed -e "s/@N@/512/" -e "s/@L@/50.0/" $SRC/bench/phase4/p4.par.in > $D/$1/p.par; echo "dCompPotStep = 100.0" >> $D/$1/p.par; }
+run() { # name
+  cd $D/$1; echo "== run $1 $(date -Is)"; tail -3 p.par
+  /usr/bin/time -v $MPI -np $((2*NN)) --map-by ppr:2:node --mca pml ucx $W/build/pkdgrav3 -sz 16 p.par > run.log 2> time.log
+  echo "$1 rc=$?"; grep -E "Elapsed|Maximum resident" time.log
+  grep -a -E "Writing .* (compressed|HDF5)|Compressed .* particles|of which potential|write-through|successfully written" run.log
+  grep -a -E "Gravity Calculated" run.log | awk '{s+=$4} END {print "gravity wall total " s " s over " NR " calls"}'
+}
+mkpar A; printf 'bCompAlsoStandard = True\n' >> $D/A/p.par; run A
+mkpar C; printf 'bHDF5 = False\niCompWriteThrough = 1\n' >> $D/C/p.par; run C
+if [ -n "$LOC" ]; then
+  $ONEPERNODE mkdir -p $L/snap 2>/dev/null
+  mkpar B; printf "bHDF5 = False\nachIoPath = \"$L/snap/{name}.{step:05d}{type}\"\n" >> $D/B/p.par; run B
+  echo "== B: copy node-local snapshots to /data (all nodes in parallel), as the drain would"
+  mkdir -p $D/B/snapshots
+  t0=$(date +%s.%N)
+  $ONEPERNODE bash -c "cp $L/snap/* $D/B/snapshots/ && sync" 2>/dev/null
+  t1=$(date +%s.%N); S=$(du -sm $D/B/snapshots | cut -f1)
+  echo "copied $S MiB in $(echo "$t1 - $t0" | bc) s = $(echo "$S/($t1 - $t0)" | bc) MiB/s"
+  $ONEPERNODE rm -rf $L 2>/dev/null
+fi
+echo "== check"
+for r in A C B; do [ -d $D/$r ] || continue; s=$D/$r/snap.00006; [ $r = B ] && s=$D/B/snapshots/snap.00006
+  echo "-- $r"; $W/build_snapcomp/pkc_check --threads 32 $s | grep -E "files|IDs|CHECK"; done
+du -sh $D/*/
+rm -rf $D
+echo "done $(date -Is)"
