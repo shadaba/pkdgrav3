@@ -1,0 +1,13 @@
+diff --git a/gravity/ewald.cxx b/gravity/ewald.cxx
+index 7d644b63..89586726 100644
+--- a/gravity/ewald.cxx
++++ b/gravity/ewald.cxx
+@@ -249,7 +249,7 @@ double pkdParticleEwald(PKD pkd, double* r, float* pa, float* pPot, double* pdFl
+         dax += tax;
+         day += tay;
+         daz += taz;
+-        dPot -= tpot;
++        dPot += tpot; /* evalEwaldSIMD already subtracts (as for full vectors above); was -=, flipping the sign of the potential of the leftover images */
+         nSIMD = 0;
+     }
+ #endif

@@ -571,6 +571,11 @@ home (`/user/shadab/pkdgrav3_io_chk`, `KEEPCHK=2`).
   difference did not depend on theta (0.4 vs 0.7, so not the tree walk) and was zero for particles within an
   eighth of the box of a face, -0.17 (code units) inside. After the fix, nReplicas 2 and 3 minus 1: -7 +- 11
   and -9 +- 14 (km/s)^2 (was -3.7e5), median with nReplicas 1 = -13381 = the self term -293/a.
+  pawna check (job 2536450, `bench/phase5/ewfix.pbs`, node3, AVX-512, 64 threads, 128^3, L = 12.5, z = 49 -> 13 in
+  10 steps, binary before vs after the fix): positions and velocities bit-identical at z = 19.3 and 13; potential
+  differs for 20.6-20.7% of particles; before: 5.1% of particles below 10x the median, min -5.3e6 (km/s)^2; after:
+  min -9.3e4, median -7036 (the Mac 128^3 run with the same parameters also gives -7036).
+  Report for upstream (their issue tracker is off): docs/upstream/ewald_bug_report.md + .patch, to be sent by the user.
   Potentials written by unfixed builds (HDF5 `Potential`, `.pot` files, compressed) are wrong for some particles
   wherever the leftover count is not zero; production 2048^3 outputs were made with an unfixed pkdgrav3 3.5.1.
 - Restart differences in the potential (5.2% of particles at step 30, max 3.6e7) come from problem 2:
