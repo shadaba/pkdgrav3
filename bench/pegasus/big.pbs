@@ -32,7 +32,9 @@ tail -7 p.par
 $MPI -np $NN --map-by ppr:1:node bash -c 'while true; do echo "$(date +%s) $(hostname -s) $(free -m | awk "/^Mem/{printf \"%d %d\", \$3, \$7} /^Swap/{printf \" %d\", \$3}")"; sleep 15; done' > mem.log 2>/dev/null &
 SP=$!
 t0=$(date +%s)
-$MPI -np $((2*NN)) --map-by ppr:2:node --mca pml ucx $W/build/pkdgrav3 -sz 16 p.par > run.log 2> err.log
+# stop pkdgrav3 10 min before the 3:55 limit so the summary below still runs (jobs 37412/37413 were killed by
+# the walltime with no summary); override with -v RUNSEC=...
+timeout ${RUNSEC:-13500} $MPI -np $((2*NN)) --map-by ppr:2:node --mca pml ucx $W/build/pkdgrav3 -sz 16 p.par > run.log 2> err.log
 echo "pkdgrav3 rc=$? wall $(( $(date +%s) - t0 )) s"
 kill $SP 2>/dev/null; sleep 1
 grep -v "cuDeviceGetCount\|Warning: Perm" err.log | tail -5
@@ -41,7 +43,10 @@ awk '{u[$2]=($3>u[$2]?$3:u[$2]); if(!($2 in a)||$4<a[$2])a[$2]=$4; s[$2]=($5>s[$
 echo "== pkdgrav3 memory report"; grep -a -i -E "Memory Models|memory \(GB\)|Particle.*size|nStore|bytes per particle" run.log | head -8
 echo "== timings"
 grep -a -E "IC Generation Complete|Domain Decomposition complete|Tree built|Gravity Calculated|Writing .*compressed|Compressed .* particles|successfully written|Calculating Gravity, Step:[0-9]+\.000000" run.log | head -60
+echo "== gravity per substep (step, rung, s)"
+grep -a -E "Calculating Gravity|Gravity Calculated" run.log | awk '/Calculating/{s=$3; r=$5} /Gravity Calculated/{print s, r, $4}' | tr -d ',()' 
 echo "== snap.timing (s per step: Step Gravity IO Tree DomainDecom ... Drift)"; cat snap.timing 2>/dev/null | grep -v "^#"
 echo "== last lines"; tail -5 run.log
+mkdir -p $W/bench/keep/big${N}_$J; cp p.par mem.log run.log snap.log $W/bench/keep/big${N}_$J/ 2>/dev/null
 du -sh $D; rm -rf $D
 echo "done $(date -Is)"

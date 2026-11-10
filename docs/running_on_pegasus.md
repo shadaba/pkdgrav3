@@ -117,8 +117,50 @@ Snapshots are 880 / 941 / 1016 MB (6.55 / 7.01 / 7.57 B/particle, of which the p
 Conclusion: on pegasus, write snapshots and checkpoints straight to `/data`. Writing through to Lustre is as fast
 as the node's own disk, so staging plus drain adds nothing; `run_staged.pbs` is for pawna's slow NFS. HDF5
 remains about 280 s per 512^3 snapshot because it is the serial writer, not because of the disk. At 2048^3
-(about 55-80 GB per snapshot over 4+ nodes) the stall is expected to be seconds; jobs 37412/37413 measure it.
+(about 55-80 GB per snapshot over 4+ nodes) the stall is expected to be seconds (not yet measured: jobs
+37412/37413 below ended before their snapshot).
+
+## Large N on 4 debug nodes: memory and step cost (jobs 37412, 37413, `bench/pegasus/big.pbs`)
+Setup: 4 Sapphire Rapids debug nodes (hpc081-084, 128 cores), 8 MPI processes x 16 threads (120 worker
+threads), `place=scatter:excl`. Production accuracy and stepping (sahyadri2048.par: classic theta and replica
+switches, Ewald, dEta 0.3, bEpsAccStep, 20 equal-time steps per output from z = 49 to 11.98), 2LPT ICs
+generated at z = 49, ordered-mode IDs, softening 8.138e-6 x 2048/N. Memory: `free -m` on every node every
+15 s, and pkdgrav3's own "resident size" / "free memory" report. Times: pkdgrav3's timers in the run log
+and `snap.log` (wall seconds per step).
+
+| | 2048^3, 200 Mpc/h (37412) | 2500^3, 400 Mpc/h (37413) |
+|---|---|---|
+| Particles | 8.59e9 | 1.56e10 |
+| Peak used per node (rank-0 node / others) | 220 / 196-199 GB | 387 / 364-366 GB |
+| Lowest MemAvailable per node | 289 GB | 125 GB |
+| pkdgrav3 resident size per process | 94.0 GB | 175.8 GB |
+| Total, per particle | ~94 B | ~95 B |
+| Swap | < 0.3 GB (unchanged from start) | < 0.3 GB |
+| IC generation (2LPT) | 81 s | 148 s |
+| First domain decomposition / tree | 113 s / 16 s | 335 s / 32 s |
+| Gravity, all particles active (rung 0-2) | 1011-1113 s (1870-2050 Gflop/s) | 1529-1536 s (2380-2410 Gflop/s) |
+| Gravity, rung 3 (42-53% active) | 862-965 s | 1103 s |
+| Domain + tree per substep | ~31 s | ~57 s |
+| One production-size step at z ~ 45 | **8416 s (2.34 h)**, measured (step 1) | ~11,000 s (3.05 h), from the substeps |
+| Ended | walltime at step 1.6 of 4 (z = 36.6), no snapshot | cancelled after 3 gravity calls (data enough) |
+
+Both fit in 4 nodes; memory is ~95 B/particle on pegasus (pawna measured 98 with swap in use). At
+z ~ 45 nearly every particle is on rung 2 or 3, so each production step costs 8 gravity calls; this is set by
+the timestep criterion, not by our test. Per particle, a step of 2500^3/400 costs 0.72x that of 2048^3/200
+(coarser mass resolution).
+
+Compared with pawna (same accuracy, 2048^3, job 2536432, 192 threads): first gravity 603 s there vs
+1111 s here, i.e. a Sapphire Rapids core does ~0.82x the work of a pawna core. pawna ran z = 49 -> 12
+in 12 h 50 min (production's first 20 steps took ~13 h of compute), so the 2.34 h measured here for one of
+those steps on 128 cores is consistent (the first steps are the costliest: theta 0.4 above z = 20).
+
+Consequence: the debug queue (4 h, 128 cores) cannot run a production model; 2048^3 on 4 nodes would need
+~15 days (~90 restarts of 4 h). A production queue is needed. The full-run estimate for 3200^3 is in
+compressed_io_plan.md section 22.
 
 ## Not done yet
+- Strong scaling beyond 4 nodes (the debug queue allows 128 cores): needed before choosing between 8, 16 and
+  32 nodes for 3200^3.
+- The compressed-write stall at 2048^3 and above on pegasus.
 - Timing on the Skylake and Ice Lake nodes, and the GPU nodes (a CUDA build would need `cuda-nvcc` 12.x in the
   environment; the P100 is Pascal).

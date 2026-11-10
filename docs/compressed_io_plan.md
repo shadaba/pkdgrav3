@@ -617,3 +617,37 @@ home (`/user/shadab/pkdgrav3_io_chk`, `KEEPCHK=2`).
 - Checks (Mac, 64^3, w0 = -0.9, wa = 0.1, z = 49 -> 3): E(z) 4.61955683, comoving distance 4288.51719 Mpc/h and age
   2.134589 Gyr equal an independent numpy integration; f = 0.9671 = Omega_m(z)^0.55; snapcomp_test passes (new
   version-3 test); version-3 files with and without the potential read back with the binary values as set.
+
+## 22. Pegasus large-N tests and the 3200^3, 400 Mpc/h estimate (2026-11-11)
+Measurements: docs/running_on_pegasus.md, "Large N on 4 debug nodes" (jobs 37412 and 37413, 4 Sapphire Rapids
+nodes, 128 cores, production accuracy and step size, `free -m` every 15 s, pkdgrav3 timers).
+- Memory: 94-95 B/particle in total (2048^3: 196-220 GB per node; 2500^3: 364-387 GB per node, the rank-0 node
+  ~20 GB above the rest); no swap.
+- Speed: a Sapphire Rapids core is ~0.82x a pawna core (first gravity at 2048^3: 1111 s x 128 cores vs
+  603 s x 192). One production step at z ~ 45: 8416 s at 2048^3/200, ~11,000 s at 2500^3/400 (8 gravity calls
+  each, all particles on rungs 2-3). Per particle the 400 Mpc/h box costs 0.72-0.76x the 200 Mpc/h box at this z.
+- Both jobs ended before their snapshot (walltime / cancelled), so no stall was measured; `big.pbs` now stops
+  pkdgrav3 10 min before the limit and keeps the logs in `bench/keep/`.
+
+**3200^3 in 400 Mpc/h** (3.28e10 particles, 3.81x 2048^3; particle mass 2.05x production's):
+- Memory: 95 B/particle -> 3.1 TB. 7 nodes of 512 GB is the minimum (~445 GB + ~20 GB on rank 0: too tight);
+  8 nodes give ~390-410 GB per node, the same load as 2500^3 on 4 nodes, which ran. 16 nodes: ~195 GB per node.
+- Compute (scaling, not measured): production 2048^3/200 is ~8 d x 192 pawna cores = ~37,000 core-h (section 18),
+  ~45,000 Sapphire Rapids core-h. Times 3.81 (N) x ~1.03 (log N) x 0.75-1.0 (coarser mass: 0.72-0.76 measured at
+  high z, assumed up to 1.0 at low z where clustering sets the rungs) -> **~130,000-175,000 core-h**.
+
+  | Nodes (Sapphire Rapids) | cores | assumed parallel efficiency vs 4 nodes | wall time, compute |
+  |---|---|---|---|
+  | 8 | 256 | ~95% | ~22-30 d |
+  | 16 | 512 | ~85% | ~12-17 d |
+  | 32 | 1024 | ~70% (unmeasured; exceeds the 20 SPR nodes) | ~7-10 d |
+
+  Recommended: **16 nodes** (memory comfortable at ~200 GB per node, about 2 weeks). 8 nodes is the cheapest
+  in core-h but ~4 weeks; 32 would need mixing node types (the job runs at the slowest node's speed).
+  2 processes x 16 threads per node as tested.
+- Output and checkpoints on /data: ~280-310 GB per late snapshot with subsamples (8.5-9.5 B/particle), 28-31 TB
+  for 100 snapshots; checkpoints 48 B/particle = 1.57 TB each. At the ~37 GB/s measured with 32 writers
+  (upper bound), a checkpoint is about a minute; budget a few minutes. Snapshot stall: seconds expected.
+- To firm up before the run: (1) a strong-scaling test at 8 and 16 nodes in a production queue (a few
+  substeps at 2500^3 or 3200^3, ~1-2 h each); (2) the production queue's walltime, which sets iWallRunTime and
+  the checkpoint interval (restart is tested, section 19). Uncertainty of the estimate: about +-30%.
