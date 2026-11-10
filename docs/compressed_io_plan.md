@@ -368,8 +368,25 @@ Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check 
   MemAvailable 189-235 GiB) at all three snapshots; stalls 1.43-1.52 s straight to NFS (A) and staged
   (B); HDF5 219-233 s; 5.31/5.72/6.28 B/particle; max error within half a step; `pkc_check` all
   134,217,728 IDs once, 1% set identical in all three snapshots; RSS 23.9 GiB; drain 25-29 MB/s.
-- Time stepping: after z = 45 most particles are on rung 4 (16 full gravity passes of ~550 s per step),
-  so z = 25 is due about 08:30 and z = 12 about 15:00-16:00 IST.
+- Whole job (`p4.pbs`, /usr/bin/time -v and the 15 s sampler; pkc_check by the job after the run, 192
+  threads, reading the drained files on NFS): pkdgrav3 rc=0, 12 h 50 min wall for 6 steps (z = 49 -> 12).
+  **Peak RSS 746.7 GiB** (782,991,992 kB; sampler 746.5 GB); node swap 42.7 GB at the peak (25 GB of it
+  before the first snapshot, the rest from the old drain, see above).
+
+  | snapshot | z | stall | size | B/particle | encode / append (thread-s) | drain to NFS |
+  |---|---|---|---|---|---|---|
+  | snap.00001 | 45 | 50.0 s | 45.6 GB | 5.311 | 2258 / 3690 | 42.5 GiB, 2003 s, 22 MB/s |
+  | snap.00003 | 25 | 54.2 s | 49.3 GB | 5.734 | 2249 / 3908 | 45.9 GiB, 2077 s, 23 MB/s |
+  | snap.00006 | 12 | 58.2 s | 54.1 GB | 6.302 | 2222 / 4580 | 50.4 GiB, 2517 s, 21 MB/s |
+
+  Writer scratch 2.14-2.15 GB over 192 threads (0.29% of RSS) at every snapshot.
+- IDs: in all three snapshots 8,589,934,592 IDs read, all distinct, none missing or out of range, all in
+  the right subsample. Distance from own lattice point rms 2.52 / 4.47 / 8.95 cells (random: ~1024).
+  Persistence of the 1% subsample against z = 45: 85,912,182 IDs there and here, all found, same set; same-ID
+  displacement median 0.17 Mpc/h (z = 25) and 0.56 Mpc/h (z = 12), max 1.9 (random pairs: ~96).
+- **Phase 4 exit met:** stall 50-58 s vs ~1.6-2.5 h for production HDF5 (> 100x), 5.3-6.3 B/particle vs
+  19.3 (production gzip-1 HDF5) and 32 (raw float32 + uint64 ID), writer RAM 0.29%, persistent IDs at no
+  memory cost (746.7 GiB vs 742 GB production without IDs and 870 GB with bMemParticleID).
 
 ## 16. Phase 5: readers (2026-11-10)
 - Python: `tools/pkcreader/pkcreader.py` (numpy + zstandard, from the spec only, one file).
