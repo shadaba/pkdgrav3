@@ -363,6 +363,11 @@ Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check 
   write-through made the stall the NFS time (30-35 s instead of 1.4-1.9 s). Now a parameter,
   `iCompWriteThrough` (-1 auto, 0, 1); auto uses it only when MemAvailable < 2x the process's snapshot
   (10 B/particle), i.e. on for 2048^3 on one node, off for 512^3.
+  Regression check (job 2536435, commit 7b2fb67f, `bench/phase4/p4.pbs` with N=512, 64 threads, same
+  as the earlier 512^3 Phase 4 run): the run log prints "write-through: 0 of 63 threads" (node
+  MemAvailable 189-235 GiB) at all three snapshots; stalls 1.43-1.52 s straight to NFS (A) and staged
+  (B); HDF5 219-233 s; 5.31/5.72/6.28 B/particle; max error within half a step; `pkc_check` all
+  134,217,728 IDs once, 1% set identical in all three snapshots; RSS 23.9 GiB; drain 25-29 MB/s.
 - Time stepping: after z = 45 most particles are on rung 4 (16 full gravity passes of ~550 s per step),
   so z = 25 is due about 08:30 and z = 12 about 15:00-16:00 IST.
 
