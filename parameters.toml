@@ -492,6 +492,15 @@ the potential in memory (bMemPotential, on by default when gravity is on); it is
 particle at the top-level step boundaries where snapshots are written.
 '''
 
+["I/O Parameters".dCompPotMaxRedshift]
+flag="compphiz"
+default=1.0e30
+help="compressed output: store the potential (dCompPotStep > 0) only in snapshots at redshift <= this"
+docs='''
+For example 1.0 stores it from z = 1 on (each snapshot's files then say whether they hold it: format
+version 2 with, version 1 without). Default: every snapshot.
+'''
+
 ["I/O Parameters".lstCompSubsamples]
 flag="compsub"
 default=[1.0]

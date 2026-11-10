@@ -55,6 +55,9 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
     in.dPotStep = parameters.get_dCompPotStep();
     in.dPotToKms2 = std::pow(L * 100.0 / csm->val.dHubble0, 2) / a;
     if (in.dPotStep < 0) throw std::runtime_error("compressed output: dCompPotStep must be >= 0");
+    // Only some snapshots (low redshift) with the potential: dCompPotMaxRedshift.
+    const bool bPotHere = in.dPotStep > 0 && 1.0 / a - 1.0 <= parameters.get_dCompPotMaxRedshift() + 1e-9;
+    if (!bPotHere) in.dPotStep = 0;
     in.nTotal = N;
     in.iSeed = uint64_t(parameters.get_iCompSubsampleSeed());
     in.nBlock = uint32_t(parameters.get_iCompBlockSize());
@@ -81,7 +84,10 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
 
     print_detail("Writing {name} in compressed format in parallel ({files} files per process, dx {dx:.4g} kpc/h, dv {dv:g} km/s{pot}) ...\n",
                  "name"_a = FileName, "files"_a = pc.size(), "dx"_a = L * 1e3 / (double(in.nCell) * in.nSub), "dv"_a = in.dVelStep,
-                 "pot"_a = in.dPotStep > 0 ? fmt::format(", potential dphi {:g} (km/s)^2", in.dPotStep) : std::string());
+                 "pot"_a = in.dPotStep > 0 ? fmt::format(", potential dphi {:g} (km/s)^2", in.dPotStep)
+                           : parameters.get_dCompPotStep() > 0
+                               ? fmt::format(", no potential (z > dCompPotMaxRedshift = {:g})", parameters.get_dCompPotMaxRedshift())
+                               : std::string());
     print_detail("Time:{time:g} Redshift:{z:g}\n", "time"_a = dTime, "z"_a = in.dRedshift);
 
     TimerStart(TIMER_IO);

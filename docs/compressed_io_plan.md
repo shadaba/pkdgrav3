@@ -473,6 +473,41 @@ Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check 
   (Higher than the 0.8 of the prototype estimate: the 9 subsample files thin out neighbours.)
 - pawna 512^3 run with checkpoints and a restart (section 19) uses dCompPotStep = 100.
 
+### Is pkdgrav3's potential right? (2026-11-10)
+- Independent check: periodic FFT Poisson solve (CIC on 256^3, deconvolved, code units: lap phi =
+  4 pi (rho - Omega_m)) on the section-11 HDF5 snapshots, interpolated to the particles, against pkdgrav3's
+  `Potential` (same as the compressed one within half a step), both in (km/s)^2:
+
+  | snapshot | slope, all | corr, all | slope, density < 2x mean | corr | offset (km/s)^2 |
+  |---|---|---|---|---|---|
+  | 200 Mpc/h, z = 3 | 1.001 | 0.9998 | 1.000 | 1.0000 | -2.86e5 |
+  | 200 Mpc/h, z = 0 | 1.017 | 0.9952 | 1.000 | 0.9973 | -7.15e4 |
+  | 12.5 Mpc/h, z = 3 | 1.001 | 0.9979 | 1.000 | 0.9908 | -1.17e3 |
+  | 12.5 Mpc/h, z = 0 | 1.005 | 0.9987 | 0.994 | 0.9653 | -6.9e2 |
+
+  Shape and normalisation agree (the 12.5 Mpc/h z = 0 grid does not resolve that box's structure).
+- The constant offset is each particle's softened interaction with itself (gravity/pp.h at r = 0:
+  -(105/64) m/eps = -1.64 m/eps; the fit gives -1.57 m/eps in the 200 Mpc/h box at both redshifts). It is
+  the same for every particle of a snapshot, so it changes no force and no energy difference, but it
+  is not zero: production 2048^3 (same m/eps in code units as 128^3 at 12.5 Mpc/h) has -293/a (km/s)^2
+  (-293 at z = 0, -1170 at z = 3). Subtract it to compare with codes that leave it out. Stored as
+  pkdgrav3 computes it (same as its HDF5).
+- `bDoPotOutput` does not change the calculation. It only turns on the potential field (on anyway with
+  gravity, `bMemPotential` defaults to 1) and, after every snapshot, does `Reorder()` and writes
+  `<name>.<step>.pot` (an array file through the single writer; 13 B/particle in production). Leave it off
+  when the compressed files hold the potential. The PM part of pkdgrav3 (`nGridLin`, linear species only)
+  adds forces but not potential; production does not use it.
+
+### Potential only at some redshifts (2026-11-10)
+- `dCompPotMaxRedshift` (flag `compphiz`, default 1e30 = every snapshot): with `dCompPotStep` > 0, the
+  potential is stored only in snapshots at z <= this. Mac 64^3 test (z = 3, 1, 0 with the cut at 1.5):
+  z = 3 written as version 1 without the potential (log: "no potential (z > dCompPotMaxRedshift = 1.5)"),
+  z = 1 and 0 as version 2 with it (1.07, 1.09 B/particle); pkc_check and the Python reader report it
+  per snapshot.
+- How much it saves depends on the output times. Snapshots evenly spaced in time from z = 49 (production:
+  one every 20 of 2020 equal steps, if the steps are equal in time) put 38% of them at z <= 0.5, 58% at
+  z <= 1, 77% at z <= 2: a cut at z = 1 saves ~40% of the potential's 16%, i.e. +~9% bytes instead of +16%.
+
 ## 18. Run-time estimate: 2048^3, 200 Mpc/h, z = 49 -> 0, 100 snapshots, one pawna node (2026-11-10)
 From the production run's file timestamps (`ls --time-style=+%s` of
 /storage/swarajit/pkdgrav3_sims/pkdgrav3_n2048_sahyadri; its logs and snap.timing are not readable):
