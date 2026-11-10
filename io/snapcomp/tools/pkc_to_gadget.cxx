@@ -7,7 +7,8 @@
 //   --blocks K      K files; file k holds exactly the particles, in the same order, that Rockstar's native
 //                   PKC reader gives block k with NUM_BLOCKS = K (files ordered by subsample and writer,
 //                   blocks in index order; pkc block i goes to file floor(start_i * K / total)).
-//   --from-hdf5 F   particles from the pkdgrav3 HDF5 snapshot F (unquantized, in file order) instead of the
+//   --from-hdf5 F   particles from the pkdgrav3 HDF5 snapshot F (unquantized, in file order; without a
+//                   ParticleIDs dataset, as in ordered mode, the row number is the ID) instead of the
 //                   .pkc blocks; box, redshift and cosmology still come from the .pkc header of prefix (the
 //                   same output step), so both routes give Rockstar identical settings. Needs HDF5.
 //   Cosmology (format version 3): OmegaLambda = omega_l + omega_de (w0-wa runs store their dark energy in
@@ -189,7 +190,12 @@ int main(int argc, char** argv) {
             H5Gclose(g);
             auto x = h5data<double>(f, "/PartType1/Coordinates", H5T_NATIVE_DOUBLE, 3);
             auto v = h5data<double>(f, "/PartType1/Velocities", H5T_NATIVE_DOUBLE, 3);
-            hid = h5data<uint64_t>(f, "/PartType1/ParticleIDs", H5T_NATIVE_UINT64, 1);
+            if (H5Lexists(f, "/PartType1/ParticleIDs", H5P_DEFAULT) > 0) hid = h5data<uint64_t>(f, "/PartType1/ParticleIDs", H5T_NATIVE_UINT64, 1);
+            else { // ordered mode (bMemUnordered = False): rows are sorted by iOrder, so the row number is the ID
+                hid.resize(x.size() / 3);
+                for (size_t i = 0; i < hid.size(); ++i) hid[i] = i;
+                std::printf("%s has no ParticleIDs: IDs = row numbers (pkdgrav3 ordered mode)\n", h5.c_str());
+            }
             H5Fclose(f);
             if (hid.size() != h0.n_total || L5 != h0.box_size || std::fabs(z5 - h0.redshift) > 1e-6 * (1 + z5))
                 throw std::runtime_error("HDF5 file and .pkc header disagree (particle count, box or redshift): not the same output step?");
