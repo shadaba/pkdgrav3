@@ -1,0 +1,48 @@
+#!/bin/bash -l
+# pegasus smoke test (debug queue, one node, 32 cores, ~5 min): 64^3 at production mass resolution
+# (L = 6.25 Mpc/h), z = 49 -> 12 in 6 steps, snapshots at z = 45, 25, 12 (bench/phase4/p4.par.in), ordered-mode
+# IDs, compressed output with the potential and HDF5 of the same states.
+#   A: 1 MPI process x 32 threads; pkc_check on every snapshot; test_pkcreader against HDF5 at z = 12.
+#   B: 2 MPI processes (one per socket) x 16 threads, compressed only; pkc_check (2 writers).
+# qsub -v PKD_IO_ROOT=/data/project/hpc2502016/shadab/pkdgrav3_io bench/pegasus/smoke.pbs
+#PBS -N pkd_smoke
+#PBS -q debug
+#PBS -l select=1:ncpus=32:mpiprocs=2:mem=64gb
+#PBS -l walltime=00:30:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+W=${PKD_IO_ROOT:-/data/project/hpc2502016/shadab/pkdgrav3_io}; export PKD_IO_ROOT=$W
+SRC=$W/pkdgrav3
+D=$W/bench/smoke_$J
+mkdir -p $W/bench/logs; exec > $W/bench/logs/smoke.$J.log 2>&1
+source $SRC/tools/pegasus/env_pegasus.sh
+echo "host $(hostname) job $J $(date -Is)"; lscpu | grep -E "Model name|^CPU\(s\)"; free -g | sed -n 2p
+(cd $SRC && git log -1 --format="source %h %s")
+for r in A B; do
+  mkdir -p $D/$r; cp $SRC/examples/euclid_z0_transfer_combined.dat $D/$r/
+  sed -e "s/@N@/64/" -e "s/@L@/6.25/" $SRC/bench/phase4/p4.par.in > $D/$r/p.par
+  echo "dCompPotStep = 100.0" >> $D/$r/p.par
+done
+echo "bCompAlsoStandard = True" >> $D/A/p.par
+echo "bHDF5 = False" >> $D/B/p.par
+
+echo "== A: 1 process x 32 threads $(date -Is)"
+cd $D/A && /usr/bin/time -v mpirun -np 1 --bind-to none $W/build/pkdgrav3 -sz 32 p.par > run.log 2> time.log; echo "A rc=$?"
+grep -a -E "Writing .*compressed|Compressed .* particles|of which potential|successfully written|ERROR|Error" run.log
+grep -E "Elapsed|Maximum resident" time.log
+ls $D/A | head -40
+echo "== B: 2 processes x 16 threads $(date -Is)"
+cd $D/B && /usr/bin/time -v mpirun -np 2 --map-by ppr:1:socket --bind-to none $W/build/pkdgrav3 -sz 16 p.par > run.log 2> time.log; echo "B rc=$?"
+grep -a -E "Writing .*compressed|Compressed .* particles|of which potential|successfully written|ERROR|Error" run.log
+grep -E "Elapsed|Maximum resident" time.log
+for r in A B; do
+  for s in 00001 00003 00006; do
+    echo "== pkc_check $r snap.$s"
+    $W/build_snapcomp/pkc_check --threads 32 --ref $D/$r/snap.00001 $D/$r/snap.$s | tail -6
+  done
+done
+echo "== test_pkcreader A z = 12"
+cd $D/A && python $SRC/tools/pkcreader/test_pkcreader.py snap.00006
+tail -30 $D/A/run.log
+echo "done $(date -Is)"
