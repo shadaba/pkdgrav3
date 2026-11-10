@@ -24,9 +24,9 @@ Not covered: other species (gas and stars are skipped with a warning); more than
 was tested only on the Mac; Rockstar reading `.pkc` natively (planned, see
 [rockstar_pkc_session_prompt.md](rockstar_pkc_session_prompt.md)).
 
-> **Warning (2026-11-10):** the potential computed by pkdgrav3 (compressed and HDF5 alike) has unexplained
-> offsets for about 5% of particles in 512^3 runs and a large constant when `nReplicas = 2`; see
-> compressed_io_plan.md section 19. Do not use it for science until this is resolved.
+> **Potential fix (2026-11-10):** pkdgrav3 3.5.1 adds part of the Ewald potential with the wrong sign (forces are
+> fine). Fixed in commit 2219e678 of this branch; potentials from older builds, HDF5 included, are wrong for
+> some particles. See compressed_io_plan.md section 19.
 
 ## 2. Measured results (how: see the sections cited)
 

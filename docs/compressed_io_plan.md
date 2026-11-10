@@ -561,7 +561,18 @@ home (`/user/shadab/pkdgrav3_io_chk`, `KEEPCHK=2`).
      checks passed), so it depends on size, threads or rungs. Cause not found yet: `p.potential()` is assigned
      (not accumulated) next to the acceleration in gravity/grav2.cxx, and positions are right, so the extra
      term is constant over each affected particle's neighbourhood (a local-expansion or Ewald constant).
-  Until this is understood, do not use the stored potential (compressed or HDF5) for science.
+  **Cause found and fixed (commit 2219e678):** `pkdParticleEwald` (gravity/ewald.cxx) evaluates the real-space Ewald
+  images in SIMD vectors. `evalEwaldSIMD` subtracts each image's potential; full vectors are accumulated straight
+  into `dPot`, but the last, partial vector went into `tpot` and was then subtracted again (`dPot -= tpot`), so
+  the 0 to width-1 leftover images were added with the wrong sign. Accelerations were added correctly, so forces
+  (and positions/velocities) were not affected. How many images are left over depends on the particle's
+  position, `nReplicas` and the SIMD width (2 on the Mac, 4/8 with AVX/AVX-512 on pawna and pegasus), hence both
+  symptoms. Found by bisection on the Mac (64^3, one step to z = 45, 8 threads): the nReplicas 2 minus 1
+  difference did not depend on theta (0.4 vs 0.7, so not the tree walk) and was zero for particles within an
+  eighth of the box of a face, -0.17 (code units) inside. After the fix, nReplicas 2 and 3 minus 1: -7 +- 11
+  and -9 +- 14 (km/s)^2 (was -3.7e5), median with nReplicas 1 = -13381 = the self term -293/a.
+  Potentials written by unfixed builds (HDF5 `Potential`, `.pot` files, compressed) are wrong for some particles
+  wherever the leftover count is not zero; production 2048^3 outputs were made with an unfixed pkdgrav3 3.5.1.
 - Restart differences in the potential (5.2% of particles at step 30, max 3.6e7) come from problem 2:
   particles that are deep in one run and normal in the other at the same position.
 
