@@ -54,7 +54,7 @@ end - 32      trailer     32 bytes
 | 272 | u32 | block_size | maximum particles per block |
 | 276 | i32 | zstd_level | |
 | 280 | u64 | step | simulation step |
-| 288 | char[...] | info | free text (NUL-terminated), e.g. JSON with code version and parameters; ends before 4080 in version 2 |
+| 288 | char[...] | info | free text (NUL-terminated), ends before 4080 in version 2. pkdgrav3 writes JSON: `code`, `pos_step_kpch_requested`, `vel_step_kms`, `pot_step_kms2`, `name`, `cosmology` (`h`, `Omega_m`, `Omega_lambda`, `Omega_b`, `Omega_rad`, `Omega_DE`, `w0`, `wa`, `sigma8`, `normalization`, `n_s`, `running`, `pivot`, `E_z` = H(z)/H0 at this snapshot, `class`, `class_file`, `tf_file`) and `run` (`n_grid`, `seed`, `z_initial`, `softening`; 0 = pkdgrav3 default). The binary fields omega_m/omega_l/h are kept for simple readers; for w0-wa dark energy omega_l is 0 and the JSON has Omega_DE, w0, wa. |
 | 4080 | f64 | pot_step | version 2 only: potential quantum, (km/s)^2 (> 0) |
 | 4088 | f64 | pot_to_kms2 | version 2 only: factor from the writer's potential unit to (km/s)^2 |
 

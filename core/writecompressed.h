@@ -50,7 +50,7 @@ class ServiceWriteCompressed : public TraverseCount<WriteCompressedStats> {
     static constexpr int MAX_SUB = 16;
     struct input {
         char achPrefix[1024];          // snapshot name; files are <prefix>.s<pct>.<process>.pkc
-        char achInfo[1024];            // free text stored in every header
+        char achInfo[3072];            // free text stored in every header (header room: 3791 bytes)
         double dCenter[3], dPeriod[3]; // periodic box in code units
         double dvFac;                  // code velocity -> dx/dt (as for the other writers)
         double dVelToKms;              // dx/dt -> peculiar km/s

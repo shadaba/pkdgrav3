@@ -78,8 +78,29 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
     if (in.nBlock < 1) throw std::runtime_error("compressed output: iCompBlockSize must be >= 1");
     snapcomp::choose_grid(L * 1000.0, parameters.get_dCompPosStep(), N, in.nCell, in.nSub);
 
-    std::string info = fmt::format("{{\"code\":\"pkdgrav3 {}\",\"pos_step_kpch_requested\":{},\"vel_step_kms\":{},\"pot_step_kms2\":{},\"name\":\"{}\"}}",
-                                   PACKAGE_VERSION, parameters.get_dCompPosStep(), in.dVelStep, in.dPotStep, FileName);
+    // Full cosmology in the info text (JSON), so w0-wa, radiation, CLASS runs etc. are self-described; the binary
+    // header keeps only Omega_m, Omega_lambda and h. E_z = H(z)/H0 at this snapshot, from pkdgrav3's own csm.
+    auto js = [](std::string s) {
+        std::string o;
+        for (char c : s) {
+            if (c == '"' || c == '\\') o += '\\';
+            o += c;
+        }
+        return o;
+    };
+    const auto& cv = csm->val;
+    std::string cosmo = fmt::format("{{\"h\":{:.10g},\"Omega_m\":{:.10g},\"Omega_lambda\":{:.10g},\"Omega_b\":{:.10g},\"Omega_rad\":{:.10g},"
+                                    "\"Omega_DE\":{:.10g},\"w0\":{:.10g},\"wa\":{:.10g},\"sigma8\":{:.10g},\"normalization\":{:.10g},\"n_s\":{:.10g},"
+                                    "\"running\":{:.10g},\"pivot\":{:.10g},\"E_z\":{:.10g},\"class\":{},\"class_file\":\"{}\",\"tf_file\":\"{}\"}}",
+                                    cv.h, cv.dOmega0, cv.dLambda, cv.dOmegab, cv.dOmegaRad, cv.dOmegaDE, cv.w0, cv.wa, cv.dSigma8, cv.dNormalization,
+                                    cv.dSpectral, cv.dRunning, cv.dPivot, csmExp2Hub(csm, a) / cv.dHubble0, cv.classData.bClass ? "true" : "false",
+                                    js(std::string(parameters.get_achClassFilename())), js(std::string(parameters.get_achTfFile())));
+    std::string run = fmt::format("{{\"n_grid\":{},\"seed\":{},\"z_initial\":{:.10g},\"softening\":{:.10g}}}", parameters.get_nGrid(), parameters.get_iSeed(),
+                                  parameters.get_dRedFrom(), parameters.get_dSoft());
+    std::string info = fmt::format("{{\"code\":\"pkdgrav3 {}\",\"pos_step_kpch_requested\":{},\"vel_step_kms\":{},\"pot_step_kms2\":{},\"name\":\"{}\","
+                                   "\"cosmology\":{},\"run\":{}}}",
+                                   PACKAGE_VERSION, parameters.get_dCompPosStep(), in.dVelStep, in.dPotStep, js(std::string(FileName)), cosmo, run);
+    if (info.size() >= sizeof(in.achInfo)) throw std::runtime_error("compressed output: info text too long");
     std::strncpy(in.achInfo, info.c_str(), sizeof(in.achInfo) - 1);
 
     print_detail("Writing {name} in compressed format in parallel ({files} files per process, dx {dx:.4g} kpc/h, dv {dv:g} km/s{pot}) ...\n",

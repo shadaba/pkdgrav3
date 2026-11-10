@@ -21,6 +21,7 @@ read_block("pos") and read_block("ids") line up.
 Lower level: PKCFile(path).header / .read(), decode_block(header, bytes), read_snapshot(prefix).
 """
 import glob
+import json
 import mmap
 import os
 import struct
@@ -203,6 +204,13 @@ class PkcSnapshot:
         self.percents = h["percents"]
         self.lattice_n = h["lattice_n"]
         self.has_potential = h["pot_step"] > 0
+        # Free-text info (JSON from pkdgrav3): full cosmology (w0, wa, Omega_DE, Omega_rad, Omega_b, sigma8, n_s,
+        # E_z = H(z)/H0, CLASS/transfer files) and run settings; empty dicts for files written before it existed.
+        try:
+            self.info = json.loads(h["info"]) if h["info"] else {}
+        except ValueError:
+            self.info = {}
+        self.cosmology = self.info.get("cosmology", {})
         self.pot_step = h["pot_step"]  # (km/s)^2, max error is half of it
         got = sum(f.header["n_particles"] for f in self.files)
         if got != self.npart:
