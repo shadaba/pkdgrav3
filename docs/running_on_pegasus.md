@@ -86,8 +86,39 @@ CUDA). This is harmless.
 
 These builds include the Ewald potential fix (commit 2219e678; compressed_io_plan.md section 19).
 
+## Write to /data directly: local staging is not needed (job 37410, `bench/pegasus/io512.pbs`)
+Setup: 4 debug nodes (hpc081-084), 8 MPI processes × 16 threads. 512^3, L = 50 Mpc/h (production mass resolution),
+z = 49 -> 12 in 6 steps, compressed snapshots with the potential at z = 45, 25 and 12.
+
+**Disks.** The compute nodes have a node-local ext4 `/local` with 514 GB free; `/tmp` and `/var/tmp` have about
+93 GB. `dd` measurements (8 GiB, O_DIRECT):
+
+| Target | Writers | Speed |
+|---|---|---|
+| `/local` | 1 | 1.3 GB/s |
+| `/data` (Lustre) | 1 | 1.0 GB/s |
+| `/data` | 32 (8 per node, 2 GiB each) | 64 GiB in 1.7 s, about 37 GB/s |
+
+The 37 GB/s is an upper bound: the Lustre servers may cache, and the data was zeros.
+
+**Snapshot stall** (time the simulation waits), the same three snapshots in each run:
+
+| Run | Where | Stall per snapshot | Run wall time |
+|---|---|---|---|
+| A | `/data`, write-through auto (off: plenty of memory) | 0.69 / 0.59 / 0.62 s | 33 min 21 s (includes HDF5) |
+| A, HDF5 of the same states (serial writer) | `/data` | 306 / 283 / 258 s | |
+| C | `/data`, write-through forced (every block on disk before the next) | 0.61 / 0.60 / 0.63 s | 18 min 53 s |
+| B | `/local` | 1.19 / 0.80 / 0.84 s | 18 min 30 s |
+| B, then copying the files to `/data` | all 4 nodes at once | 2.7 GiB in 2.9 s (944 MiB/s, 1 copy per node) | |
+
+Snapshots are 880 / 941 / 1016 MB (6.55 / 7.01 / 7.57 B/particle, of which the potential is 1.26-1.30).
+`pkc_check` passes on all three runs: all 134,217,728 IDs once, 72 files from 8 writers.
+
+Conclusion: on pegasus, write snapshots and checkpoints straight to `/data`. Writing through to Lustre is as fast
+as the node's own disk, so staging plus drain adds nothing; `run_staged.pbs` is for pawna's slow NFS. HDF5
+remains about 280 s per 512^3 snapshot because it is the serial writer, not because of the disk. At 2048^3
+(about 55-80 GB per snapshot over 4+ nodes) the stall is expected to be seconds; jobs 37412/37413 measure it.
+
 ## Not done yet
-- Staging with `run_staged.pbs` across several nodes (one drain per node; checkpoint pieces spread over nodes).
-  It is probably unnecessary on Lustre: test writing straight to `/data` first.
-- Timing at 512^3 and above, the Skylake and Ice Lake nodes, and the GPU nodes (a CUDA build would need
-  `cuda-nvcc` 12.x in the environment; the P100 is Pascal).
+- Timing on the Skylake and Ice Lake nodes, and the GPU nodes (a CUDA build would need `cuda-nvcc` 12.x in the
+  environment; the P100 is Pascal).
