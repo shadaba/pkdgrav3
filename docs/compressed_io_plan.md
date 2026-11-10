@@ -605,3 +605,15 @@ home (`/user/shadab/pkdgrav3_io_chk`, `KEEPCHK=2`).
   snapshots: keeps up.
 - Checkpoints (48 B/particle): 0.82 / 1.65 TB. 3250^3 does not fit the 1.4 TB local SSD for staging: write
   checkpoints straight to home (0.27-0.49 GB/s: 1-1.7 h each) or add NVMe.
+
+## 21. Self-describing snapshots: simulation metadata and format version 3 (2026-11-10/11)
+- Info JSON (commits f4b1cd57, 5cb1dbe9): following the simulation part of an AbacusSummit header, every snapshot
+  records `sim` (achSimName/achSimSet/achSimComment, code version and git describe, write time, host, processes,
+  threads, gpu), `box`, `ic`, `cosmology` (all parameters including w0, wa, Omega_DE, Omega_rad, plus E(z), H(z),
+  Omega_m(z), Omega_DE(z), growth D and f, age and comoving distance at the snapshot), `numerics` and `steps`.
+  Halo-finder settings are not included. Field list with units: snapcomp_format.md.
+- Format version 3 (commit 5697d3c3): a binary cosmology block (Omega_b, Omega_rad, Omega_DE, w0, wa, sigma8, n_s,
+  running, normalization, pivot) at header offset 4000, so C readers get H(z) without a JSON parser.
+- Checks (Mac, 64^3, w0 = -0.9, wa = 0.1, z = 49 -> 3): E(z) 4.61955683, comoving distance 4288.51719 Mpc/h and age
+  2.134589 Gyr equal an independent numpy integration; f = 0.9671 = Omega_m(z)^0.55; snapcomp_test passes (new
+  version-3 test); version-3 files with and without the potential read back with the binary values as set.
