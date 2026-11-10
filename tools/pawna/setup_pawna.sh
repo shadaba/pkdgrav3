@@ -6,7 +6,7 @@
 set -eu
 ROOT=${1:?usage: setup_pawna.sh <root directory>}
 REPO=${REPO:-https://github.com/shadaba/pkdgrav3.git}
-BRANCH=${BRANCH:-feature/compressed-output}
+BRANCH=${BRANCH:-main}
 mkdir -p "$ROOT" && cd "$ROOT"
 [ -e pkdgrav3 ] && { echo "$ROOT/pkdgrav3 exists; use another directory or update it with git pull"; exit 1; }
 git clone -b "$BRANCH" "$REPO" pkdgrav3

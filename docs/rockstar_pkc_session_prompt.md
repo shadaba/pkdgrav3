@@ -11,7 +11,7 @@ We run Sahyadri-style dark-matter simulations with pkdgrav3 3.5.1 on pawna (4 no
 each, slow NFS /storage at ~30 MB/s). Writing HDF5 snapshots took ~2.5 h per 2048^3 snapshot. We added a
 compressed, parallel snapshot format to pkdgrav3:
 
-- Code: https://github.com/shadaba/pkdgrav3, branch `feature/compressed-output`. Main docs there:
+- Code: https://github.com/shadaba/pkdgrav3, branch `main`. Main docs there:
   `docs/compressed_io_plan.md` (plan and all measurements), `docs/snapcomp_format.md` (byte-level format
   spec, version 1), `docs/running_on_pawna.md` (setup, parameters, staging/drain),
   `docs/memory_persistent_ids.md`.

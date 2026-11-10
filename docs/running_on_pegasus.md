@@ -24,7 +24,7 @@ Pegasus setup is kept separate from pawna's ([running_on_pawna.md](running_on_pa
 ## Set-up (one command, on a login node)
 
 ```bash
-git clone -b feature/compressed-output https://github.com/shadaba/pkdgrav3.git /tmp/$USER-pkd
+git clone -b main https://github.com/shadaba/pkdgrav3.git /tmp/$USER-pkd
 bash /tmp/$USER-pkd/tools/pegasus/setup_pegasus.sh /data/project/hpc2502016/shadab/pkdgrav3_io
 rm -rf /tmp/$USER-pkd
 ```

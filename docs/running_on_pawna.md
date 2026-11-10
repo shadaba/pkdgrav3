@@ -2,7 +2,7 @@
 
 Feature summary and run examples for every option: [compressed_output_guide.md](compressed_output_guide.md).
 
-How to build our pkdgrav3 (3.5.1 + branch `feature/compressed-output`) on pawna and run it with the
+How to build our pkdgrav3 (3.5.1 + branch `main`) on pawna and run it with the
 different snapshot I/O options, including staging snapshots on the node-local SSD and draining them
 to NFS during the run. Everything here was tested; measurements are in
 [compressed_io_plan.md](compressed_io_plan.md) sections 8-9.
@@ -42,7 +42,7 @@ Everything lives in one root directory of your choice (called `$ROOT` below; for
 
 ```bash
 ssh pawna
-git clone -b feature/compressed-output https://github.com/shadaba/pkdgrav3.git /tmp/$USER-pkd-setup
+git clone -b main https://github.com/shadaba/pkdgrav3.git /tmp/$USER-pkd-setup
 bash /tmp/$USER-pkd-setup/tools/pawna/setup_pawna.sh /storage/$USER/pkdgrav3_io      # 20-40 min
 rm -rf /tmp/$USER-pkd-setup
 qsub -v PKD_IO_ROOT=/storage/$USER/pkdgrav3_io /storage/$USER/pkdgrav3_io/pkdgrav3/bench/phase0/smoke32.pbs
@@ -55,7 +55,7 @@ cat /storage/$USER/pkdgrav3_io/bench/logs/p0_smoke32.<job>.log                  
 ROOT=/storage/$USER/pkdgrav3_io
 mkdir -p $ROOT/bench/logs && cd $ROOT
 # 1. source (the fork, branch with compressed output; never push to upstream)
-git clone -b feature/compressed-output https://github.com/shadaba/pkdgrav3.git pkdgrav3
+git clone -b main https://github.com/shadaba/pkdgrav3.git pkdgrav3
 (cd pkdgrav3 && git submodule update --init)          # EOSlib, ANEOSmaterial
 # 2. Python: system 3.10 with the system NumPy 1.21 (its headers are the ones the compiler finds)
 python3 -m venv --system-site-packages venv

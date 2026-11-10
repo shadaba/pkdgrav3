@@ -7,7 +7,7 @@
 set -eu
 ROOT=${1:?usage: setup_pegasus.sh <root directory>}
 REPO=${REPO:-https://github.com/shadaba/pkdgrav3.git}
-BRANCH=${BRANCH:-feature/compressed-output}
+BRANCH=${BRANCH:-main}
 CONDA_BASE=${CONDA_BASE:-$HOME/miniconda3}
 mkdir -p "$ROOT" && cd "$ROOT"
 source "$CONDA_BASE/etc/profile.d/conda.sh"

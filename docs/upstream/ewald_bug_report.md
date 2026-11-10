@@ -60,5 +60,5 @@ Best regards,
 Shadab Alam
 
 (Found while adding a compressed snapshot writer to pkdgrav3 3.5.1: https://github.com/shadaba/pkdgrav3,
-branch feature/compressed-output, commit 2219e678. The tests are bench/phase5/ewfix.pbs and section 19 of
+branch main, commit 2219e678. The tests are bench/phase5/ewfix.pbs and section 19 of
 docs/compressed_io_plan.md there.)

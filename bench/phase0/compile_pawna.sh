@@ -1,5 +1,5 @@
 #!/bin/bash -l
-# Build pkdgrav3 (3.5.1 + branch feature/compressed-output), the snapcomp tools and the HDF5 gzip shim on
+# Build pkdgrav3 (3.5.1 + branch main), the snapcomp tools and the HDF5 gzip shim on
 # the pawna login node (short builds). PKD_IO_ROOT (default /storage/shadab/pkdgrav3_io) holds pkdgrav3/
 # (the clone) and venv/; builds go to build/ and build_snapcomp/. CLEAN=1 rebuilds pkdgrav3 from scratch.
 # Deps: openmpi-5.0.1 module (as production), system HDF5 1.10.7, GSL, FFTW, Boost 1.74, the venv.

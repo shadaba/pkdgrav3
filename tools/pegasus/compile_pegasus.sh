@@ -1,5 +1,5 @@
 #!/bin/bash -l
-# Build pkdgrav3 (branch feature/compressed-output) and the snapcomp tools on the pegasus login node.
+# Build pkdgrav3 (branch main) and the snapcomp tools on the pegasus login node.
 # PKD_IO_ROOT holds pkdgrav3/ (clone) and env/ (conda, made by setup_pegasus.sh); builds go to build/ and
 # build_snapcomp/. CLEAN=1 rebuilds pkdgrav3 from scratch.
 # ARCH: CPU target (-march). Default skylake-avx512 runs on every compute node type (Skylake hpc001-060,

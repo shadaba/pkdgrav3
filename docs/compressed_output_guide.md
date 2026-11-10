@@ -1,6 +1,6 @@
 # Compressed parallel output for pkdgrav3: what was added and how to use it
 
-Branch `feature/compressed-output` of https://github.com/shadaba/pkdgrav3 (pkdgrav3 3.5.1 plus the changes
+Branch `main` of https://github.com/shadaba/pkdgrav3 (pkdgrav3 3.5.1 plus the changes
 below). This page is the user guide. For details see:
 - set-up and staging on pawna: [running_on_pawna.md](running_on_pawna.md);
 - file format: [snapcomp_format.md](snapcomp_format.md);
@@ -120,7 +120,7 @@ python3 -c 'import sys; sys.path.insert(0, "'$SRC'/tools/pkcreader"); from pkcre
 ### 3.4 pawna: one-time set-up
 
 ```bash
-git clone -b feature/compressed-output https://github.com/shadaba/pkdgrav3.git /tmp/$USER-pkd-setup
+git clone -b main https://github.com/shadaba/pkdgrav3.git /tmp/$USER-pkd-setup
 bash /tmp/$USER-pkd-setup/tools/pawna/setup_pawna.sh /storage/$USER/pkdgrav3_io      # 20-40 min
 rm -rf /tmp/$USER-pkd-setup
 ```
