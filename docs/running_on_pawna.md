@@ -1,5 +1,7 @@
 # Running pkdgrav3 on pawna: build, I/O options and snapshot staging
 
+Feature summary and run examples for every option: [compressed_output_guide.md](compressed_output_guide.md).
+
 How to build our pkdgrav3 (3.5.1 + branch `feature/compressed-output`) on pawna and run it with the
 different snapshot I/O options, including staging snapshots on the node-local SSD and draining them
 to NFS during the run. Everything here was tested; measurements are in
@@ -121,7 +123,7 @@ bMemParticleID = False   # no separate 8-byte ID field
 | `achIoPath` | = `achOutPath` | **snapshots only**: point this at local disk to stage |
 | `achCheckpointPath` | = `achOutPath` | checkpoints (keep on NFS) |
 | `bParaWrite` / `nParaWrite` | false / 0 | parallel writing; does not work on pawna (open item) |
-| `bDoPotOutput` | 0 | potential is only computed on request, but Density and Potential columns are written anyway |
+| `bDoPotOutput` | 0 | only adds a separate `.pot` file after each snapshot; the potential is computed anyway (`bMemPotential` is on with gravity). For the compressed files use `dCompPotStep` instead (compressed_io_plan.md section 17) |
 | `iWallRunTime` | 0 | **minutes** of wall time before pkdgrav3 checkpoints and stops |
 | `iCheckInterval` | 0 | steps between checkpoints |
 
