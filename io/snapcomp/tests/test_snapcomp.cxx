@@ -394,6 +394,43 @@ static void test_speed() {
                 16.0 * block / dsec / 1e6, double(bytes) / (4.0 * p.id.size()));
 }
 
+static void test_cosmology_header(const std::string& dir) {
+    // version 3: binary cosmology block at 4000, with and without the potential; info ends before 4000
+    Header h = make_header(32, 25, 2.44, 32);
+    h.has_cosmology = true;
+    h.omega_b = 0.049, h.omega_rad = 9e-5, h.omega_de = 0.69, h.w0 = -0.9, h.wa = 0.1;
+    h.sigma8 = 0.81, h.n_s = 0.965, h.running = 0.001, h.normalization = 0, h.pivot = 0.05;
+    h.info = std::string(5000, 'y');
+    std::vector<uint8_t> hb(HEADER_SIZE);
+    h.pack(hb.data());
+    Header u = Header::unpack(hb.data());
+    CHECK(hb[8] == 3 && u.has_cosmology && !u.has_potential() && u.info.size() == 4000 - 288 - 1);
+    CHECK(u.omega_b == 0.049 && u.omega_rad == 9e-5 && u.omega_de == 0.69 && u.w0 == -0.9 && u.wa == 0.1);
+    CHECK(u.sigma8 == 0.81 && u.n_s == 0.965 && u.running == 0.001 && u.normalization == 0 && u.pivot == 0.05);
+    h.pot_step = 50, h.pot_to_kms2 = 1;
+    h.info = "{}";
+    h.pack(hb.data());
+    u = Header::unpack(hb.data());
+    CHECK(hb[8] == 3 && u.has_potential() && u.pot_step == 50 && u.w0 == -0.9 && u.info == "{}");
+    // a version-3 file round trip (no potential)
+    h.pot_step = 0;
+    Parts p = lattice_parts(32, 1.0, 200, 11);
+    const std::string path = dir + "/snapcomp_v3.pkc";
+    {
+        BlockEncoder enc(h);
+        FileWriter w(path, h);
+        auto& out = enc.encode(p.id.size(), p.pos.data(), p.vel.data(), p.id.data());
+        w.append(out.data(), out.size(), uint32_t(p.id.size()));
+        w.close();
+    }
+    FileReader r(path);
+    Block b;
+    r.read_block(0, b);
+    CHECK(r.header().has_cosmology && r.header().wa == 0.1 && b.size() == p.id.size() && b.P.empty());
+    std::remove(path.c_str());
+    std::printf("  cosmology header (version 3): ok\n");
+}
+
 int main(int argc, char** argv) {
     std::string dir = argc > 1 ? argv[1] : "/tmp";
     std::printf("snapcomp tests\n");
@@ -406,6 +443,7 @@ int main(int argc, char** argv) {
     roundtrip(h, lattice_parts(64, 4.0, 500, 2), 1000, "lattice, block 1000");
     test_file_threads(dir);
     test_potential(dir);
+    test_cosmology_header(dir);
     test_speed();
     std::printf(failures ? "FAILED: %d checks\n" : "all tests passed\n", failures);
     return failures ? 1 : 0;

@@ -87,6 +87,10 @@ int main(int argc, char** argv) {
     std::printf("%s: %zu files, N=%llu^3, z=%.4f, writers=%u, subsamples=%u, grid %ux%u (dx %.4f kpc/h), dv %g km/s, %s\n", prefix.c_str(), paths.size(),
                 (unsigned long long)N, h0.redshift, h0.n_writers, h0.n_subsamples, h0.ncell, h0.sub, h0.box_size * 1e3 / double(Q), h0.vel_step,
                 h0.has_potential() ? ("potential dphi " + std::to_string(h0.pot_step) + " (km/s)^2").c_str() : "no potential");
+    if (h0.has_cosmology)
+        std::printf("  cosmology (format version 3): L %g Mpc/h, h %g, Omega_m %g, Omega_lambda %g, Omega_DE %g (w0 %g, wa %g), Omega_b %g, Omega_rad %g, "
+                    "sigma8 %g, n_s %g\n",
+                    h0.box_size, h0.h, h0.omega_m, h0.omega_l, h0.omega_de, h0.w0, h0.wa, h0.omega_b, h0.omega_rad, h0.sigma8, h0.n_s);
 
     // ---- pass 1: every ID once, membership, lattice offsets
     std::vector<std::atomic<uint64_t>> bits((ntot + 63) / 64);

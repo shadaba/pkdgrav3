@@ -16,7 +16,8 @@ for pos, vel, ids in s.iter_blocks():     # streaming, <= 65536 particles at a t
     ...
 ```
 
-- Cosmology: `s.Om`, `s.Olam`, `s.hubble` from the binary header; the full set (w0, wa, Omega_DE, Omega_rad,
+- Cosmology: `s.Om`, `s.Olam`, `s.hubble` from the binary header (version 3 files also have Omega_b, Omega_rad,
+  Omega_DE, w0, wa, sigma8, n_s, running, normalization, pivot in `s.header["cosmology"]`); the full set (w0, wa, Omega_DE, Omega_rad,
   Omega_b, sigma8, n_s, ...) and values at the snapshot (E(z), H(z), Omega_m(z), growth D and f, age, comoving
   distance) in `s.cosmology`. Everything else pkdgrav3 records is in `s.info`: `sim`, `box`, `ic`, `numerics`,
   `steps` (see docs/snapcomp_format.md). Snapshots written before 2026-11-10 give empty dicts. For w0-wa runs

@@ -36,7 +36,9 @@ _TRAILER_MAGIC = b"PKCIDX\x00\x01"
 _BLOCK_MAGIC = b"PKB1"
 ID_RAW, ID_DELTA_IN_CELL, ID_LAGRANGIAN = 0, 1, 2
 K_POT = 8
-POT_OFFSET = 4080  # version 2: pot_step, pot_to_kms2 (doubles); the info text ends before it
+POT_OFFSET = 4080  # versions 2, 3: pot_step, pot_to_kms2 (doubles)
+COSMO_OFFSET = 4000  # version 3: 10 doubles of cosmology; the info text ends before it
+COSMO_KEYS = ("Omega_b", "Omega_rad", "Omega_DE", "w0", "wa", "sigma8", "n_s", "running", "normalization", "pivot")
 RHO_CRIT = 2.77536627e11  # Msun/h per (Mpc/h)^3
 
 _FIELDS = [  # (offset, struct code, name)
@@ -53,16 +55,20 @@ def parse_header(b):
     if bytes(b[:8]) != _HEADER_MAGIC:
         raise ValueError("not a snapcomp file")
     version, hsize = struct.unpack_from("<II", b, 8)
-    if version not in (1, 2) or hsize != HEADER_SIZE:
+    if version not in (1, 2, 3) or hsize != HEADER_SIZE:
         raise ValueError(f"unsupported version {version} / header size {hsize}")
     h = {name: struct.unpack_from("<" + code, b, off)[0] for off, code, name in _FIELDS}
     h["version"] = version
     h["percents"] = list(struct.unpack_from("<16d", b, 128))[: h["n_subsamples"]]
-    end = POT_OFFSET if version >= 2 else HEADER_SIZE
+    end = COSMO_OFFSET if version >= 3 else POT_OFFSET if version >= 2 else HEADER_SIZE
     h["info"] = bytes(b[288:end]).split(b"\x00", 1)[0].decode(errors="replace")
     h["pot_step"], h["pot_to_kms2"] = struct.unpack_from("<2d", b, POT_OFFSET) if version >= 2 else (0.0, 1.0)
-    if version >= 2 and not h["pot_step"] > 0:
+    if version == 2 and not h["pot_step"] > 0:
         raise ValueError("version 2 header without a potential step")
+    if not h["pot_step"] > 0:
+        h["pot_step"], h["pot_to_kms2"] = 0.0, 1.0
+    # version 3: binary cosmology (Omega_DE with w(a) = w0 + wa (1 - a); pivot in 1/Mpc); {} before version 3
+    h["cosmology"] = dict(zip(COSMO_KEYS, struct.unpack_from("<10d", b, COSMO_OFFSET))) if version >= 3 else {}
     h["q"] = h["ncell"] * h["sub"]
     return h
 
@@ -210,7 +216,9 @@ class PkcSnapshot:
             self.info = json.loads(h["info"]) if h["info"] else {}
         except ValueError:
             self.info = {}
-        self.cosmology = self.info.get("cosmology", {})
+        # info JSON cosmology (with values at the snapshot), completed with the version-3 binary block
+        self.cosmology = dict(h["cosmology"])
+        self.cosmology.update(self.info.get("cosmology", {}))
         self.pot_step = h["pot_step"]  # (km/s)^2, max error is half of it
         got = sum(f.header["n_particles"] for f in self.files)
         if got != self.npart:

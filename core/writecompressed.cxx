@@ -143,6 +143,9 @@ int ServiceWriteCompressed::Service(PST pst, void* vin, int nIn, void* vout, int
         h.block_size = in.nBlock;
         h.zstd_level = in.iLevel;
         h.step = in.iStep;
+        h.has_cosmology = true;
+        h.omega_b = in.dCosmo[0], h.omega_rad = in.dCosmo[1], h.omega_de = in.dCosmo[2], h.w0 = in.dCosmo[3], h.wa = in.dCosmo[4];
+        h.sigma8 = in.dCosmo[5], h.n_s = in.dCosmo[6], h.running = in.dCosmo[7], h.normalization = in.dCosmo[8], h.pivot = in.dCosmo[9];
         h.info.assign(in.achInfo, strnlen(in.achInfo, sizeof in.achInfo));
         h.pot_step = in.dPotStep;
         h.pot_to_kms2 = in.dPotToKms2;

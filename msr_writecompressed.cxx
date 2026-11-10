@@ -51,6 +51,11 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
     in.dOmega0 = csm->val.dOmega0;
     in.dLambda = csm->val.dLambda;
     in.dHubble = csm->val.h;
+    {
+        const auto& c = csm->val;
+        const double cosmo[10] = {c.dOmegab, c.dOmegaRad, c.dOmegaDE, c.w0, c.wa, c.dSigma8, c.dSpectral, c.dRunning, c.dNormalization, c.dPivot};
+        std::memcpy(in.dCosmo, cosmo, sizeof(cosmo));
+    }
     in.dVelStep = parameters.get_dCompVelStep();
     // Potential: comoving code units (G = 1, box = 1); peculiar physical potential = phi * U^2 / a with U the
     // code velocity unit in km/s (checked on Mac snapshots: <v^2>/well depth is then independent of a).

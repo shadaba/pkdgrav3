@@ -1,7 +1,12 @@
-# snapcomp file format, versions 1 and 2
+# snapcomp file format, versions 1 to 3
 
-Version 2 = version 1 plus the gravitational potential (two header fields, one stream per block). A
-file without the potential is written as version 1, byte for byte as before. Readers accept both.
+| version | adds | written when |
+|---|---|---|
+| 1 | - | the potential is not stored and the writer gives no binary cosmology (standalone tools such as `pkc_convert`) |
+| 2 | the gravitational potential: `pot_step`, `pot_to_kms2` in the header, one stream per block | potential stored, no binary cosmology |
+| 3 | a binary cosmology block (10 doubles at 4000); the potential is optional (present if `pot_step > 0`) | **pkdgrav3 from 2026-11-11 on** (every snapshot) |
+
+Readers accept all three. The info text ends before 4000 (version 3), 4080 (version 2) or 4096 (version 1).
 
 Compressed dark-matter snapshot written in parallel by pkdgrav3 threads (Option A of
 [compressed_io_plan.md](compressed_io_plan.md)). Reference implementation: `io/snapcomp/`
@@ -54,9 +59,23 @@ end - 32      trailer     32 bytes
 | 272 | u32 | block_size | particles | maximum particles per block |
 | 276 | i32 | zstd_level | - | |
 | 280 | u64 | step | - | simulation step (from the snapshot name `<name>.<step>`) |
-| 288 | char[...] | info | - | NUL-terminated text, ends before 4080 in version 2 (at most 3791 bytes); pkdgrav3 writes JSON, see "Info JSON" below |
-| 4080 | f64 | pot_step | (km/s)^2 | version 2 only: potential quantum (> 0; max error pot_step/2) |
-| 4088 | f64 | pot_to_kms2 | (km/s)^2 per writer unit | version 2 only: factor from the writer's potential unit to (km/s)^2 (informational) |
+| 288 | char[...] | info | - | NUL-terminated text, ends before 4000 (version 3, at most 3711 characters), 4080 (version 2) or 4096 (version 1); pkdgrav3 writes JSON, see "Info JSON" below |
+| 4000 | f64 | omega_b | - | version 3: Omega_b today |
+| 4008 | f64 | omega_rad | - | version 3: Omega_rad today (photons + massless neutrinos as pkdgrav3 uses them; 0 if not used) |
+| 4016 | f64 | omega_de | - | version 3: Omega of the dynamical dark energy component (0 if only a cosmological constant, see omega_l) |
+| 4024 | f64 | w0 | - | version 3: w(a) = w0 + wa (1 - a) of omega_de |
+| 4032 | f64 | wa | - | version 3 |
+| 4040 | f64 | sigma8 | - | version 3: power spectrum normalisation (0 if `normalization` is used) |
+| 4048 | f64 | n_s | - | version 3: primordial spectral index |
+| 4056 | f64 | running | - | version 3: running of n_s |
+| 4064 | f64 | normalization | - | version 3: pkdgrav3 dNormalization (alternative to sigma8; 0 if sigma8 is used) |
+| 4072 | f64 | pivot | 1/Mpc | version 3: pivot scale of n_s and running |
+| 4080 | f64 | pot_step | (km/s)^2 | versions 2, 3: potential quantum (max error pot_step/2); > 0 in version 2; 0 in version 3 = no potential |
+| 4088 | f64 | pot_to_kms2 | (km/s)^2 per writer unit | versions 2, 3 (if pot_step > 0): factor from the writer's potential unit to (km/s)^2 (informational) |
+
+The background expansion of any run follows from the binary header alone (version 3):
+E(a)^2 = omega_m a^-3 + omega_rad a^-4 + omega_l + omega_de a^(-3(1+w0+wa)) exp(-3 wa (1-a)) + omega_k a^-2, with
+omega_k = 1 - omega_m - omega_l - omega_de - omega_rad.
 
 Position step = box_size / (ncell * sub) Mpc/h; velocity step = vel_step km/s; potential step = pot_step (km/s)^2.
 
@@ -67,7 +86,7 @@ Position step = box_size / (ncell * sub) Mpc/h; velocity step = vel_step km/s; p
 | position | cell key + offset in cell (integers) | comoving Mpc/h, in [0, L) (box units [-0.5, 0.5) before multiplying by box_size and shifting) | max error box_size/(ncell*sub)/2 per coordinate (0.98 kpc/h for the default 1.953 kpc/h step) |
 | velocity | integer multiple of vel_step | km/s, peculiar velocity v = a dx/dt (not Gadget's v/sqrt(a)) | max error vel_step/2 per component |
 | ID | u64 (lossless) | - | exact; for pkdgrav3 ICs the Lagrangian index `(iz*N+iy)*N+ix` |
-| potential (version 2) | integer multiple of pot_step | (km/s)^2, peculiar gravitational potential in physical units (pkdgrav3 code potential * U^2 / a, U = code velocity unit in km/s); zero point: periodic, mean density removed; includes pkdgrav3's constant softened self term -(105/64) m/eps | max error pot_step/2 |
+| potential (pot_step > 0) | integer multiple of pot_step | (km/s)^2, peculiar gravitational potential in physical units (pkdgrav3 code potential * U^2 / a, U = code velocity unit in km/s); zero point: periodic, mean density removed; includes pkdgrav3's constant softened self term -(105/64) m/eps | max error pot_step/2 |
 | mass | not stored | Msun/h: all particles have `box.particle_mass_msunh` = rho_crit Omega_m L^3 / n_total (rho_crit = 2.77536627e11 h^2 Msun/Mpc^3) | exact |
 
 ### Info JSON (pkdgrav3, snapshots written from 2026-11-10 on)
@@ -197,7 +216,7 @@ Streams in order (`kind` value in brackets):
 | 8 | 5 | n | id_coder 0: IDs as they are |
 | 8 | 6 | n | id_coder 1: zigzag of ID differences (see below) |
 | 8-10 | 7 | n | id_coder 2: zigzag of Lagrangian residual x, y, z |
-| last | 8 | n | version 2 only: potential, zigzag of the difference to the previous particle in block order (0 before the first) |
+| last | 8 | n | only if pot_step > 0 (versions 2, 3): potential, zigzag of the difference to the previous particle in block order (0 before the first) |
 
 Particles in a block are sorted by cell key, then by ID. Decoding, for particle j in cell c:
 

@@ -29,7 +29,7 @@
 
 namespace snapcomp {
 
-constexpr uint32_t FORMAT_VERSION = 2; // written only when the potential is stored; otherwise 1 (same bytes as before)
+constexpr uint32_t FORMAT_VERSION = 3; // 3: binary cosmology block (+ optional potential); 2: potential; 1: neither
 constexpr uint32_t HEADER_SIZE = 4096;
 constexpr int MAX_SUBSAMPLES = 16;
 
@@ -56,7 +56,11 @@ struct Header {
     uint64_t step = 0;
     double pot_step = 0;    // (km/s)^2; 0 = no potential stored (version 1 file)
     double pot_to_kms2 = 1; // writer potential unit -> peculiar potential in (km/s)^2
-    std::string info;       // free text, at most 4080-289 bytes
+    // Version 3: cosmology needed to rebuild the background (H(z) for w0-wa, radiation) without parsing the info JSON
+    bool has_cosmology = false;
+    double omega_b = 0, omega_rad = 0, omega_de = 0, w0 = -1, wa = 0;      // Omega_DE has w(a) = w0 + wa (1 - a)
+    double sigma8 = 0, n_s = 0, running = 0, normalization = 0, pivot = 0; // pivot in 1/Mpc
+    std::string info; // free text, at most 4000-289 bytes (version 3), 4080-289 (version 2), 4096-289 (version 1)
 
     bool has_potential() const { return pot_step > 0; }
 

@@ -14,7 +14,7 @@ below). This page is the user guide. For details see:
 | Subsamples | `lstCompSubsamples`, for example `[1,3,5,9,10,12,15,20,25]` %. There is one file per subsample. A particle's subsample depends only on its ID (a hash with seed `iCompSubsampleSeed`), so it is the same in every snapshot. Reading the 1% file reads 1% of the bytes. | [12] |
 | Persistent IDs at no memory cost | Ordered mode (`bMemUnordered = False`, `bMemParticleID = False`). The compressed writer stores `iOrder` as the ID. For pkdgrav3 ICs this equals the Lagrangian lattice index, the same as `ParticleID`. It saves the +128 GB that `bMemParticleID` costs at 2048^3. | [memory_persistent_ids.md](memory_persistent_ids.md), [15] |
 | Write-through when memory is short | `iCompWriteThrough = -1` (auto). Blocks bypass the page cache only when the node's free memory is less than twice the snapshot size. This avoids swapping out the simulation at 2048^3. A 512^3 run keeps its 1.5 s stall. | [15] |
-| Gravitational potential (optional) | `dCompPotStep > 0` stores the peculiar potential in (km/s)^2 with that step (format version 2). It costs about 1.2 B/particle (+16%) at a step of 100. `dCompPotMaxRedshift` stores it only at low redshift. Checked against pkdgrav3's HDF5 `Potential` and an independent FFT Poisson solve. | [17] |
+| Gravitational potential (optional) | `dCompPotStep > 0` stores the peculiar potential in (km/s)^2 with that step (stored if `pot_step > 0`; format versions 2 and 3). It costs about 1.2 B/particle (+16%) at a step of 100. `dCompPotMaxRedshift` stores it only at low redshift. Checked against pkdgrav3's HDF5 `Potential` and an independent FFT Poisson solve. | [17] |
 | Snapshot staging and drain | `tools/staging/run_staged.pbs` with `pkd_drain.py`. Snapshots are written to the node's local SSD (about 1 GB/s) and copied to NFS in the background. The disk guard switches back to writing straight to NFS when the SSD is full. | [9], running_on_pawna.md section 4-5 |
 | Checkpoint staging | `CHKSTAGE=1`. Checkpoints are also written to the local SSD and copied by a second worker to their own destination, which may be another file server (for example home). The restart file is copied last. Only the newest `KEEPCHK` complete checkpoints are kept. | [19], `tools/staging/test_drain.py` |
 | Readers and tools | `tools/pkcreader/pkcreader.py` (Python: numpy + zstandard). `pkc_check` (IDs, subsamples, persistence between snapshots). `pkc_to_gadget` (Gadget-2 files for Rockstar). `pkc_convert` (HDF5 to .pkc). `bench/phase5/cmp_runs.py` (compares two runs particle by particle). | [16] |
@@ -237,7 +237,7 @@ import sys; sys.path.insert(0, "/storage/shadab/pkdgrav3_io/pkdgrav3/tools/pkcre
 from pkcreader import PkcSnapshot
 s = PkcSnapshot("snapshots/snap.00100")      # s.redshift, s.Lbox, s.npart, s.mpart, s.has_potential, s.pot_step
 d = s.read(subsamples=[1])                   # pos (n,3) Mpc/h in [0, L), vel (n,3) km/s peculiar, ids
-d = s.read(fields=("pos", "pot", "ids"))     # pot: peculiar potential in (km/s)^2 (version-2 files)
+d = s.read(fields=("pos", "pot", "ids"))     # pot: peculiar potential in (km/s)^2 (if s.has_potential)
 for pos, vel, ids in s.iter_blocks():        # streaming
     ...
 ```

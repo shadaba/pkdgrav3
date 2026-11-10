@@ -7,13 +7,14 @@ Paste everything below the line into a new Claude Code session started in the sa
 
 ## Context: where pkdgrav3 output stands (2026-11-10)
 
-We run Sahyadri-style dark-matter simulations with pkdgrav3 3.5.1 on pawna (4 nodes x 192 cores, 755 GB
+We run Sahyadri-style dark-matter simulations with pkdgrav3 3.5.1 on pawna (1 nodes x 192 cores, 755 GB
 each, slow NFS /storage at ~30 MB/s). Writing HDF5 snapshots took ~2.5 h per 2048^3 snapshot. We added a
 compressed, parallel snapshot format to pkdgrav3:
 
 - Code: https://github.com/shadaba/pkdgrav3, branch `main`. Main docs there:
   `docs/compressed_io_plan.md` (plan and all measurements), `docs/snapcomp_format.md` (byte-level format
-  spec, version 1), `docs/running_on_pawna.md` (setup, parameters, staging/drain),
+  spec, versions 1-3; pkdgrav3 now writes version 3, whose header has a binary cosmology block with
+  Omega_DE, w0, wa so H(z) needs no JSON parsing), `docs/running_on_pawna.md` (setup, parameters, staging/drain),
   `docs/memory_persistent_ids.md`.
 - Enabled with `bCompressedOutput = True` in the pkdgrav3 parameter file. Every thread compresses its own
   particles and writes in parallel. A 512^3 snapshot takes 1.4-1.9 s instead of 250-280 s for HDF5;

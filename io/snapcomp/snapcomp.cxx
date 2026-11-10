@@ -22,7 +22,8 @@ const char HEADER_MAGIC[8] = {'P', 'K', 'C', 'O', 'M', 'P', 0, 1};
 const char TRAILER_MAGIC[8] = {'P', 'K', 'C', 'I', 'D', 'X', 0, 1};
 const char BLOCK_MAGIC[4] = {'P', 'K', 'B', '1'};
 constexpr size_t BLOCK_HEADER = 16, STREAM_ENTRY = 12, INDEX_ENTRY = 32, TRAILER = 32, INFO_OFFSET = 288;
-constexpr size_t POT_OFFSET = 4080; // pot_step, pot_to_kms2 (version 2); the info text ends before it
+constexpr size_t POT_OFFSET = 4080;   // pot_step, pot_to_kms2 (versions 2, 3)
+constexpr size_t COSMO_OFFSET = 4000; // version 3: 10 doubles of cosmology; the info text ends before it
 
 enum StreamKind : uint8_t { K_CELLKEY = 1, K_COUNT = 2, K_OFFSET = 3, K_VEL = 4, K_ID_RAW = 5, K_ID_DELTA = 6, K_ID_LAGR = 7, K_POT = 8 };
 
@@ -63,7 +64,8 @@ int width_for(uint64_t maxv) {
 void Header::pack(uint8_t* b) const {
     std::memset(b, 0, HEADER_SIZE);
     std::memcpy(b, HEADER_MAGIC, 8);
-    put<uint32_t>(b, 8, has_potential() ? FORMAT_VERSION : 1u);
+    const uint32_t version = has_cosmology ? 3u : has_potential() ? 2u : 1u;
+    put<uint32_t>(b, 8, version);
     put<uint32_t>(b, 12, HEADER_SIZE);
     put<uint64_t>(b, 16, n_particles);
     put<uint64_t>(b, 24, n_blocks);
@@ -88,8 +90,13 @@ void Header::pack(uint8_t* b) const {
     put<uint32_t>(b, 272, block_size);
     put<int32_t>(b, 276, zstd_level);
     put<uint64_t>(b, 280, step);
-    size_t n = std::min(info.size(), size_t(POT_OFFSET - INFO_OFFSET - 1));
+    const size_t info_end = version >= 3 ? COSMO_OFFSET : POT_OFFSET;
+    size_t n = std::min(info.size(), info_end - INFO_OFFSET - 1); // truncated, always NUL-terminated
     std::memcpy(b + INFO_OFFSET, info.data(), n);
+    if (version >= 3) {
+        const double c[10] = {omega_b, omega_rad, omega_de, w0, wa, sigma8, n_s, running, normalization, pivot};
+        for (int i = 0; i < 10; ++i) put<double>(b, COSMO_OFFSET + 8 * i, c[i]);
+    }
     if (has_potential()) {
         put<double>(b, POT_OFFSET, pot_step);
         put<double>(b, POT_OFFSET + 8, pot_to_kms2);
@@ -99,7 +106,7 @@ void Header::pack(uint8_t* b) const {
 Header Header::unpack(const uint8_t* b) {
     check(std::memcmp(b, HEADER_MAGIC, 8) == 0, "not a snapcomp file (bad header magic)");
     const uint32_t version = get<uint32_t>(b, 8);
-    check(version == 1 || version == 2, "unsupported format version");
+    check(version >= 1 && version <= 3, "unsupported format version");
     check(get<uint32_t>(b, 12) == HEADER_SIZE, "unexpected header size");
     Header h;
     h.n_particles = get<uint64_t>(b, 16);
@@ -129,9 +136,19 @@ Header Header::unpack(const uint8_t* b) {
     if (version >= 2) {
         h.pot_step = get<double>(b, POT_OFFSET);
         h.pot_to_kms2 = get<double>(b, POT_OFFSET + 8);
-        check(h.pot_step > 0, "version 2 header without a potential step");
+        check(version >= 3 || h.pot_step > 0, "version 2 header without a potential step");
+        check(h.pot_step >= 0, "negative potential step");
+        if (h.pot_step == 0) h.pot_to_kms2 = 1;
     }
-    h.info.assign(s, strnlen(s, (version >= 2 ? POT_OFFSET : HEADER_SIZE) - INFO_OFFSET));
+    if (version >= 3) {
+        h.has_cosmology = true;
+        double c[10];
+        for (int i = 0; i < 10; ++i) c[i] = get<double>(b, COSMO_OFFSET + 8 * i);
+        h.omega_b = c[0], h.omega_rad = c[1], h.omega_de = c[2], h.w0 = c[3], h.wa = c[4];
+        h.sigma8 = c[5], h.n_s = c[6], h.running = c[7], h.normalization = c[8], h.pivot = c[9];
+    }
+    const size_t info_end = version >= 3 ? COSMO_OFFSET : version >= 2 ? POT_OFFSET : HEADER_SIZE;
+    h.info.assign(s, strnlen(s, info_end - INFO_OFFSET));
     check(h.ncell > 0 && h.sub > 0 && h.vel_step > 0, "invalid grid or velocity step in header");
     return h;
 }

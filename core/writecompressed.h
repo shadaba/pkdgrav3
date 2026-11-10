@@ -50,12 +50,13 @@ class ServiceWriteCompressed : public TraverseCount<WriteCompressedStats> {
     static constexpr int MAX_SUB = 16;
     struct input {
         char achPrefix[1024];          // snapshot name; files are <prefix>.s<pct>.<process>.pkc
-        char achInfo[3712];            // free text stored in every header (header room: 3791 bytes)
+        char achInfo[3712];            // free text stored in every header (room: 3711 characters in version 3)
         double dCenter[3], dPeriod[3]; // periodic box in code units
         double dvFac;                  // code velocity -> dx/dt (as for the other writers)
         double dVelToKms;              // dx/dt -> peculiar km/s
         double dBoxMpch, dRedshift, dTime, dOmega0, dLambda, dHubble;
-        double dVelStep; // km/s
+        double dCosmo[10]; // version-3 header block: Omega_b, Omega_rad, Omega_DE, w0, wa, sigma8, n_s, running, normalization, pivot
+        double dVelStep;   // km/s
         double dPercents[MAX_SUB];
         std::uint64_t nTotal, nLattice, iStep, iSeed;
         std::uint32_t nCell, nSub, nBlock, nPercents;
