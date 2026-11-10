@@ -1,6 +1,6 @@
 # pkdgrav3: compressed, parallel snapshot output (plan and Claude Code brief)
 
-Status: draft v1, 2026-11-06. Open items at the end.
+Status: draft v1, 2026-11-06; project complete 2026-11-11 (tag v3.5.1-snapcomp.1). Open items: section 7.
 
 ## 1. Goal
 Write 100 snapshots of 2048^3 particles (ID, position, velocity) from pkdgrav3 in a compressed format, in parallel, with negligible extra RAM. Target: cut the simulation stall per snapshot by at least 20x versus today (about 30 MB/s, roughly 2.5 h per 275 GB snapshot) and cut bytes on disk by at least 3x versus raw float32 + uint64 ID.
@@ -55,12 +55,30 @@ Option B to test offline (decision experiment, not a commitment): Lagrangian (ID
 - Keep the codec free of pkdgrav3 headers so it can be split into its own repo later.
 - Python reader and format spec in sahyadri-sandbox.
 
-## 7. Open items
-- Which pkdgrav3 tree and build carries gzip level 1 in HDF5?
-- How exactly does `bParaWrite` fail (crash, hang, corrupt file)?
-- Are IDs Lagrangian grid indices (id = (i*N+j)*N+k)?
-- Does pawna have node-local scratch disk?
-- Accuracy target: keep current uint8 cell offset + 12-bit velocity and current Ngrid?
+## 7. Open items (status 2026-11-11)
+The questions raised on 2026-11-06, with where each was answered:
+- ~~Which pkdgrav3 tree and build carries gzip level 1 in HDF5?~~ None: 3.5.1 hardcodes gzip 9; production
+  forces level 1 with the LD_PRELOAD shim `libh5shim.so` (`PKD_H5_DEFLATE=1`). Section 8.
+- ~~How exactly does `bParaWrite` fail?~~ Not investigated further: the compressed writer makes every thread
+  write its own files, so `bParaWrite` is no longer needed. Likely cause noted in section 3 (HDF5 writes from
+  several threads without a thread-safe HDF5).
+- ~~Are IDs Lagrangian grid indices?~~ Yes, id = (iz*N + iy)*N + ix. Section 11; ordered mode (ID = iOrder)
+  keeps them at no memory cost, section 15.
+- ~~Does pawna have node-local scratch disk?~~ Yes, ~1.4 TB SSD per node. Section 9. Pegasus has `/local`
+  (514 GB) but does not need it: writing straight to Lustre is as fast (running_on_pegasus.md).
+- ~~Accuracy target?~~ User-chosen per run; default = Sahyadri accuracy (50 position steps per mean particle
+  spacing, 1.95 kpc/h at production; dv = 2.44 km/s). Sections 12-13.
+
+Still open (2026-11-11):
+- Pegasus strong scaling at 8 and 16 nodes (needs a production queue); sets the node count for 3200^3
+  (section 22).
+- Compressed-write stall at >= 2048^3 on pegasus (a short 2048^3 run with one snapshot fits the debug queue;
+  above the 512^3 limit, so needs approval).
+- Timing on pegasus Skylake, Ice Lake and GPU nodes (a CUDA build is not set up).
+- `bMemIntegerPosition` (~20% less memory) in a full-length run.
+- Rockstar reading `.pkc` natively (separate session, rockstar_pkc_session_prompt.md); its
+  `pkc_to_gadget` changes are on branch `pkc-to-gadget-v3`, to be merged into main when done.
+- Optional: halo-potential error of the pre-fix Ewald bug by halo mass (section 19).
 
 ## 8. Notes after rebasing onto pkdgrav3 3.5.1 (2026-11-06)
 Section 3 was read from wullm 7a5041e (3.1.2). The branch is now based on upstream v3.5.1 (dcce745f), the release production runs; section 3 must be re-checked against it.
