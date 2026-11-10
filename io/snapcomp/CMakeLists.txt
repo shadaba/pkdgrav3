@@ -60,6 +60,7 @@ if(SNAPCOMP_TESTS)
   target_link_libraries(pkc_to_gadget snapcomp)
 
   # HDF5 snapshot -> compressed files (with subsamples) -> decoded and verified; needs HDF5 C library
+  enable_language(C) # FindHDF5 compiles a C test program (a fresh configure failed on pawna without it)
   find_package(HDF5 COMPONENTS C)
   if(HDF5_FOUND)
     # pkc_to_gadget --from-hdf5 (exact-snapshot route for validating Rockstar's PKC reader)
