@@ -17,8 +17,10 @@ for pos, vel, ids in s.iter_blocks():     # streaming, <= 65536 particles at a t
 ```
 
 - Cosmology: `s.Om`, `s.Olam`, `s.hubble` from the binary header; the full set (w0, wa, Omega_DE, Omega_rad,
-  Omega_b, sigma8, n_s, E_z = H(z)/H0, CLASS/transfer files) in `s.cosmology`, and run settings in `s.info["run"]`
-  (snapshots written from 2026-11-10 on; older files give empty dicts). For w0-wa runs `s.Olam` is 0.
+  Omega_b, sigma8, n_s, ...) and values at the snapshot (E(z), H(z), Omega_m(z), growth D and f, age, comoving
+  distance) in `s.cosmology`. Everything else pkdgrav3 records is in `s.info`: `sim`, `box`, `ic`, `numerics`,
+  `steps` (see docs/snapcomp_format.md). Snapshots written before 2026-11-10 give empty dicts. For w0-wa runs
+  `s.Olam` is 0.
 - Velocities are peculiar, in km/s (Gadget files store v/sqrt(a); this reader does not).
 - `mpart` = rho_crit * Omega_m * L^3 / N in Msun/h.
 - Subsamples are given by percent. A particle's subsample depends only on its ID, so it is the same in

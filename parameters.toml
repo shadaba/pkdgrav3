@@ -481,6 +481,21 @@ flag="compdv"
 default=2.44
 help="compressed output: velocity step in km/s (max error is half of it)"
 
+["I/O Parameters".achSimName]
+flag="simname"
+default=""
+help="simulation name stored in compressed snapshot headers (default: name of the run directory)"
+
+["I/O Parameters".achSimSet]
+flag="simset"
+default=""
+help="simulation suite/set name stored in compressed snapshot headers (e.g. Sahyadri)"
+
+["I/O Parameters".achSimComment]
+flag="simcomment"
+default=""
+help="free-text comment stored in compressed snapshot headers (e.g. Planck2018 LCDM, w0 = -0.9)"
+
 ["I/O Parameters".dCompPotStep]
 flag="compdphi"
 default=0.0

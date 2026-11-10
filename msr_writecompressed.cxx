@@ -16,6 +16,8 @@
 #include "master.h"
 
 #include <cmath>
+#include <ctime>
+#include <unistd.h>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -78,8 +80,10 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
     if (in.nBlock < 1) throw std::runtime_error("compressed output: iCompBlockSize must be >= 1");
     snapcomp::choose_grid(L * 1000.0, parameters.get_dCompPosStep(), N, in.nCell, in.nSub);
 
-    // Full cosmology in the info text (JSON), so w0-wa, radiation, CLASS runs etc. are self-described; the binary
-    // header keeps only Omega_m, Omega_lambda and h. E_z = H(z)/H0 at this snapshot, from pkdgrav3's own csm.
+    // Self-description in the info text (JSON; the binary header keeps only Omega_m, Omega_lambda and h).
+    // Groups follow the simulation part of an AbacusSummit header: sim (provenance), box, ic, cosmology (with
+    // derived quantities at this snapshot, from pkdgrav3's own csm, so w0-wa/radiation/CLASS runs are covered),
+    // numerics, steps.
     auto js = [](std::string s) {
         std::string o;
         for (char c : s) {
@@ -89,18 +93,108 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
         return o;
     };
     const auto& cv = csm->val;
-    std::string cosmo = fmt::format("{{\"h\":{:.10g},\"Omega_m\":{:.10g},\"Omega_lambda\":{:.10g},\"Omega_b\":{:.10g},\"Omega_rad\":{:.10g},"
-                                    "\"Omega_DE\":{:.10g},\"w0\":{:.10g},\"wa\":{:.10g},\"sigma8\":{:.10g},\"normalization\":{:.10g},\"n_s\":{:.10g},"
-                                    "\"running\":{:.10g},\"pivot\":{:.10g},\"E_z\":{:.10g},\"class\":{},\"class_file\":\"{}\",\"tf_file\":\"{}\"}}",
-                                    cv.h, cv.dOmega0, cv.dLambda, cv.dOmegab, cv.dOmegaRad, cv.dOmegaDE, cv.w0, cv.wa, cv.dSigma8, cv.dNormalization,
-                                    cv.dSpectral, cv.dRunning, cv.dPivot, csmExp2Hub(csm, a) / cv.dHubble0, cv.classData.bClass ? "true" : "false",
-                                    js(std::string(parameters.get_achClassFilename())), js(std::string(parameters.get_achTfFile())));
-    std::string run = fmt::format("{{\"n_grid\":{},\"seed\":{},\"z_initial\":{:.10g},\"softening\":{:.10g}}}", parameters.get_nGrid(), parameters.get_iSeed(),
-                                  parameters.get_dRedFrom(), parameters.get_dSoft());
-    std::string info = fmt::format("{{\"code\":\"pkdgrav3 {}\",\"pos_step_kpch_requested\":{},\"vel_step_kms\":{},\"pot_step_kms2\":{},\"name\":\"{}\","
-                                   "\"cosmology\":{},\"run\":{}}}",
-                                   PACKAGE_VERSION, parameters.get_dCompPosStep(), in.dVelStep, in.dPotStep, js(std::string(FileName)), cosmo, run);
-    if (info.size() >= sizeof(in.achInfo)) throw std::runtime_error("compressed output: info text too long");
+    const double H0 = cv.dHubble0, h = cv.h, z = 1.0 / a - 1.0;
+    // step number from the snapshot name (<name>.<step>), as BuildName makes it
+    {
+        auto dot = FileName.rfind('.');
+        auto s = (dot == std::string_view::npos) ? std::string_view() : FileName.substr(dot + 1);
+        if (!s.empty() && s.find_first_not_of("0123456789") == std::string_view::npos) in.iStep = std::stoull(std::string(s));
+    }
+    // sim
+    std::string simName(parameters.get_achSimName());
+    if (simName.empty()) {
+        char cwd[4096];
+        if (getcwd(cwd, sizeof(cwd))) {
+            std::string c(cwd);
+            simName = c.substr(c.find_last_of('/') + 1);
+        }
+    }
+    char host[256] = "";
+    gethostname(host, sizeof(host) - 1);
+    char when[32] = "";
+    std::time_t now = std::time(nullptr);
+    std::strftime(when, sizeof(when), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
+#ifndef PKD_GIT_DESCRIBE
+    #define PKD_GIT_DESCRIBE ""
+#endif
+    std::string sim = fmt::format("{{\"name\":\"{}\",\"set\":\"{}\",\"comment\":\"{}\",\"code\":\"pkdgrav3 {}\",\"code_git\":\"{}\",\"written_utc\":\"{}\","
+                                  "\"host\":\"{}\",\"mpi_processes\":{},\"threads\":{},\"gpu\":{}}}",
+                                  js(simName), js(std::string(parameters.get_achSimSet())), js(std::string(parameters.get_achSimComment())), PACKAGE_VERSION,
+                                  PKD_GIT_DESCRIBE, when, js(host), mdl->Procs(), mdl->Threads(),
+#ifdef USE_CUDA
+                                  parameters.get_bGPU() ? "true" : "false"
+#else
+                                  "false"
+#endif
+    );
+    // box
+    const double mpart = 2.77536627e11 * cv.dOmega0 * L * L * L / double(N); // Msun/h
+    const bool bSoftGlobal = parameters.has_dSoft();
+    const double epsCode = bSoftGlobal ? parameters.get_dSoft() : (parameters.get_nGrid() > 0 ? 1.0 / (50.0 * parameters.get_nGrid()) : 0.0);
+    std::string box = fmt::format("{{\"L_mpch\":{:.10g},\"L_mpc\":{:.10g},\"n_particles\":{},\"n_grid\":{},\"particle_mass_msunh\":{:.10g},"
+                                  "\"particle_mass_msun\":{:.10g},\"softening_kpch\":{:.6g},\"softening_source\":\"{}\",\"softening_max\":{:.6g},"
+                                  "\"softening_max_is_multiplier\":{},\"max_physical_softening\":{:.6g}}}",
+                                  L, L / h, N, parameters.get_nGrid(), mpart, mpart / h, epsCode * L * 1e3,
+                                  bSoftGlobal ? "dSoft" : (parameters.get_nGrid() > 0 ? "default 1/(50 nGrid)" : "per particle (input file)"),
+                                  parameters.get_dSoftMax(), parameters.get_bSoftMaxMul() ? "true" : "false", parameters.get_dMaxPhysicalSoft());
+    // ic
+    std::string ic = fmt::format("{{\"z_initial\":{:.10g},\"lpt_order\":{},\"seed\":{},\"fixed_amplitude\":{},\"phase_pi\":{:.6g},\"input_file\":\"{}\","
+                                 "\"tf_file\":\"{}\",\"class\":{},\"class_file\":\"{}\"}}",
+                                 parameters.get_dRedFrom(), parameters.get_iLPT(), parameters.get_iSeed(), parameters.get_bFixedAmpIC() ? "true" : "false",
+                                 parameters.get_dFixedAmpPhasePI(), js(std::string(parameters.get_achInFile())), js(std::string(parameters.get_achTfFile())),
+                                 cv.classData.bClass ? "true" : "false", js(std::string(parameters.get_achClassFilename())));
+    // cosmology: parameters and derived quantities at this snapshot
+    auto E = [&](double x) { return csmExp2Hub(csm, x) / H0; };
+    const double Ez = E(a);
+    const double Ok = 1.0 - cv.dOmega0 - cv.dLambda - cv.dOmegaDE - cv.dOmegaRad;
+    const double rhoDE = cv.dLambda + cv.dOmegaDE * std::pow(a, -3.0 * (1.0 + cv.w0 + cv.wa)) * std::exp(-3.0 * cv.wa * (1.0 - a));
+    double D1, D2, D3a, D3b, D3c, f1, f2, f3a, f3b, f3c, D10, f10;
+    csmComoveGrowth(csm, a, &D1, &D2, &D3a, &D3b, &D3c, &f1, &f2, &f3a, &f3b, &f3c);
+    csmComoveGrowth(csm, 1.0, &D10, &D2, &D3a, &D3b, &D3c, &f10, &f2, &f3a, &f3b, &f3c);
+    double chi = 0; // comoving distance, Mpc/h: (c/100) int_a^1 da / (a^2 E), Simpson in a
+    {
+        const int n = 2000;
+        const double da = (1.0 - a) / n;
+        for (int i = 0; i <= n; ++i) {
+            double x = a + i * da, w = (i == 0 || i == n) ? 1 : (i % 2 ? 4 : 2);
+            chi += w / (x * x * E(x));
+        }
+        chi *= da / 3.0 * 2997.92458;
+    }
+    const double tH = 9.777922216807891 / h; // 1/H0 in Gyr
+    std::string cosmo =
+        fmt::format("{{\"h\":{:.10g},\"H0\":{:.10g},\"Omega_m\":{:.10g},\"Omega_lambda\":{:.10g},\"Omega_b\":{:.10g},\"Omega_rad\":{:.10g},"
+                    "\"Omega_DE\":{:.10g},\"Omega_K\":{:.10g},\"w0\":{:.10g},\"wa\":{:.10g},\"omega_b\":{:.10g},\"omega_cdm\":{:.10g},\"sigma8\":{:.10g},"
+                    "\"normalization\":{:.10g},\"n_s\":{:.10g},\"running\":{:.10g},\"pivot\":{:.10g},\"class\":{},\"class_file\":\"{}\",\"tf_file\":\"{}\","
+                    "\"redshift\":{:.10g},\"scale_factor\":{:.10g},\"E_z\":{:.10g},\"H_z_kms_mpc\":{:.10g},\"Omega_m_z\":{:.10g},\"Omega_DE_z\":{:.10g},"
+                    "\"growth_D\":{:.10g},\"growth_f\":{:.10g},\"age_gyr\":{:.10g},\"hubble_time_gyr\":{:.10g},\"comoving_distance_mpch\":{:.10g}}}",
+                    h, 100 * h, cv.dOmega0, cv.dLambda, cv.dOmegab, cv.dOmegaRad, cv.dOmegaDE, Ok, cv.w0, cv.wa, cv.dOmegab * h * h,
+                    (cv.dOmega0 - cv.dOmegab) * h * h, cv.dSigma8, cv.dNormalization, cv.dSpectral, cv.dRunning, cv.dPivot,
+                    cv.classData.bClass ? "true" : "false", js(std::string(parameters.get_achClassFilename())), js(std::string(parameters.get_achTfFile())), z,
+                    a, Ez, 100 * h * Ez, cv.dOmega0 / (a * a * a * Ez * Ez), rhoDE / (Ez * Ez), D1 / D10, f1, csmExp2Time(csm, a) * H0 * tH, tH, chi);
+    // numerics
+    std::string num = fmt::format("{{\"theta\":{:.6g},\"replicas\":{},\"ewald\":{},\"ewald_cut\":{:.6g},\"eta\":{:.6g},\"eps_acc_step\":{},\"new_kdk\":{}}}",
+                                  parameters.get_dTheta(), parameters.get_nReplicas(), parameters.get_bEwald() ? "true" : "false", parameters.get_dEwCut(),
+                                  parameters.get_dEta(), parameters.get_bEpsAccStep() ? "true" : "false", parameters.get_bNewKDK() ? "true" : "false");
+    // steps: output redshifts (dRedTo) and steps per segment
+    auto nSteps = parameters.get_nSteps();
+    auto zTo = parameters.get_dRedTo();
+    int64_t nTot = 0;
+    std::string ns, zs;
+    bool same = true;
+    for (size_t k = 0; k < nSteps.size(); ++k) {
+        nTot += nSteps[k];
+        same &= nSteps[k] == nSteps[0];
+        ns += (k ? "," : "") + std::to_string(nSteps[k]);
+    }
+    for (size_t k = 0; k < zTo.size(); ++k) zs += fmt::format("{}{:.6g}", k ? "," : "", zTo[k]);
+    std::string steps = fmt::format("{{\"step\":{},\"total_steps\":{},\"steps_per_segment\":{},\"segment_end_redshifts\":[{}],\"output_interval\":{}}}",
+                                    in.iStep, nTot, same && !nSteps.empty() ? std::to_string(nSteps[0]) : "[" + ns + "]", zs, parameters.get_iOutInterval());
+    std::string info =
+        fmt::format("{{\"code\":\"pkdgrav3 {}\",\"pos_step_kpch_requested\":{},\"vel_step_kms\":{},\"pot_step_kms2\":{},\"name\":\"{}\","
+                    "\"sim\":{},\"box\":{},\"ic\":{},\"cosmology\":{},\"numerics\":{},\"steps\":{}}}",
+                    PACKAGE_VERSION, parameters.get_dCompPosStep(), in.dVelStep, in.dPotStep, js(std::string(FileName)), sim, box, ic, cosmo, num, steps);
+    if (info.size() >= sizeof(in.achInfo)) throw std::runtime_error(fmt::format("compressed output: info text too long ({} bytes)", info.size()));
     std::strncpy(in.achInfo, info.c_str(), sizeof(in.achInfo) - 1);
 
     print_detail("Writing {name} in compressed format in parallel ({files} files per process, dx {dx:.4g} kpc/h, dv {dv:g} km/s{pot}) ...\n",

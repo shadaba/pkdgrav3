@@ -108,6 +108,12 @@ if(Git_FOUND)
     endif()
   endif()
 endif()
+# Build provenance for compressed snapshot headers (taken at configure time)
+if(Git_FOUND)
+  execute_process(COMMAND ${GIT_EXECUTABLE} describe --always --dirty --abbrev=12 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                  OUTPUT_VARIABLE PKD_GIT_DESCRIBE OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+set_source_files_properties(msr_writecompressed.cxx PROPERTIES COMPILE_DEFINITIONS "PKD_GIT_DESCRIBE=\"${PKD_GIT_DESCRIBE}\"")
 find_package(GSL REQUIRED)      # GNU Scientific Library
 find_package(HDF5 COMPONENTS C HL)
 find_package(FFTW REQUIRED)

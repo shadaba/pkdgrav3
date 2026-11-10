@@ -58,6 +58,9 @@ iCompWriteThrough   = -1         # -1 auto, 0 off, 1 on
 dCompPotStep        = 0.0        # (km/s)^2; 0 = no potential
 dCompPotMaxRedshift = 1.0e30     # potential only in snapshots at z <= this
 bCompAlsoStandard   = False      # also write the HDF5/Tipsy snapshot (validation only)
+achSimName          = ""         # stored in every snapshot header (default: run directory name)
+achSimSet           = ""         # e.g. "Sahyadri"
+achSimComment       = ""         # e.g. "Planck2018 LCDM"
 ```
 
 For persistent IDs without extra memory (recommended, essential at 2048^3):
