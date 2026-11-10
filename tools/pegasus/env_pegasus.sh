@@ -13,6 +13,6 @@ unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH
 export PYTHONHOME=$CONDA_PREFIX
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 # conda's UCX also probes CUDA; on CPU nodes that prints "cuDeviceGetCount ... initialization error". Skip it.
-export UCX_TLS=${UCX_TLS:-^cuda}
+export UCX_TLS=${UCX_TLS:-^cuda}   # harmless either way; the cuDeviceGetCount message still appears
 # mpirun on several nodes (ssh launch): pass these to the remote processes with mpirun_pegasus_args
 mpirun_pegasus_args="--prefix $CONDA_PREFIX -x PATH -x LD_LIBRARY_PATH -x PYTHONHOME -x UCX_TLS"

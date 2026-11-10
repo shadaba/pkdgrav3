@@ -19,6 +19,7 @@ below). This page is the user guide. For details see:
 | Checkpoint staging | `CHKSTAGE=1`. Checkpoints are also written to the local SSD and copied by a second worker to their own destination, which may be another file server (for example home). The restart file is copied last. Only the newest `KEEPCHK` complete checkpoints are kept. | [19], `tools/staging/test_drain.py` |
 | Readers and tools | `tools/pkcreader/pkcreader.py` (Python: numpy + zstandard). `pkc_check` (IDs, subsamples, persistence between snapshots). `pkc_to_gadget` (Gadget-2 files for Rockstar). `pkc_convert` (HDF5 to .pkc). `bench/phase5/cmp_runs.py` (compares two runs particle by particle). | [16] |
 | pawna set-up | `tools/pawna/setup_pawna.sh`: clone, venv and build in a new directory with one command. | running_on_pawna.md section 2 |
+| pegasus set-up | `tools/pegasus/setup_pegasus.sh`: conda environment, clone and build; debug-queue tests in `bench/pegasus/`. | [running_on_pegasus.md](running_on_pegasus.md) |
 
 Not covered: other species (gas and stars are skipped with a warning); more than one MPI process per node
 was tested only on the Mac; Rockstar reading `.pkc` natively (planned, see
