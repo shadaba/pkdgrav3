@@ -1,0 +1,47 @@
+#!/bin/bash -l
+# pegasus: does N^3 fit in 4 debug nodes (4 x 512 GB, 8 MPI processes x 16 threads), and how long do production-
+# sized steps take? Production stepping (sahyadri2048.par): 20 equal-time steps per output segment, first segment
+# z = 49 (our ICs) -> 11.98; K steps of that size from z = 49 end at ZK (1: 40.386, 2: 34.723, 3: 30.669,
+# 4: 27.598). Production accuracy (classic theta/replicas switches, Ewald, dEta 0.3, bEpsAccStep), softening
+# 8.138e-6 * 2048/N (production's dSoft at the same fraction of the particle spacing), ordered-mode IDs,
+# compressed output at the end (no potential), straight to /data. Memory sampled on every node every 15 s.
+# qsub -v PKD_IO_ROOT=...,N=2048,L=200,K=4,ZK=27.5982527319 bench/pegasus/big.pbs
+#PBS -N pkd_big
+#PBS -q debug
+#PBS -l select=4:ncpus=32:mpiprocs=2:mem=490gb
+#PBS -l place=scatter:excl
+#PBS -l walltime=03:55:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+W=${PKD_IO_ROOT:-/data/project/hpc2502016/shadab/pkdgrav3_io}; export PKD_IO_ROOT=$W
+SRC=$W/pkdgrav3
+: "${N:?}" "${L:?}" "${K:?}" "${ZK:?}"
+D=$W/bench/big${N}_$J
+mkdir -p $W/bench/logs $D; exec > $W/bench/logs/big${N}.$J.log 2>&1
+source $SRC/tools/pegasus/env_pegasus.sh
+NODES=$(sort -u $PBS_NODEFILE); NN=$(echo "$NODES" | wc -l)
+echo "job $J $(date -Is) N=$N L=$L K=$K ZK=$ZK nodes: $(echo $NODES)"; (cd $SRC && git log -1 --format="source %h %s")
+MPI="mpirun --hostfile $PBS_NODEFILE --bind-to none $mpirun_pegasus_args"
+SOFT=$(python -c "print(8.138e-6*2048/$N)")
+cd $D; cp $SRC/examples/euclid_z0_transfer_combined.dat .
+sed -e "s/@N@/$N/" -e "s/@L@/$L/" $SRC/bench/phase4/p4.par.in | grep -v "^nSteps\|^dRedTo\|^iOutInterval\|^bHDF5\|^bVDetails" > p.par
+printf "nSteps = [$K]\ndRedTo = [$ZK]\niOutInterval = 1000\ndSoft = $SOFT\nbHDF5 = False\nbVDetails = True\n" >> p.par
+tail -7 p.par
+# memory sampler: one per node, every 15 s: time host used_MB available_MB swap_used_MB
+$MPI -np $NN --map-by ppr:1:node bash -c 'while true; do echo "$(date +%s) $(hostname -s) $(free -m | awk "/^Mem/{printf \"%d %d\", \$3, \$7} /^Swap/{printf \" %d\", \$3}")"; sleep 15; done' > mem.log 2>/dev/null &
+SP=$!
+t0=$(date +%s)
+$MPI -np $((2*NN)) --map-by ppr:2:node --mca pml ucx $W/build/pkdgrav3 -sz 16 p.par > run.log 2> err.log
+echo "pkdgrav3 rc=$? wall $(( $(date +%s) - t0 )) s"
+kill $SP 2>/dev/null; sleep 1
+grep -v "cuDeviceGetCount\|Warning: Perm" err.log | tail -5
+echo "== memory per node (peak used, min available, peak swap; GB)"
+awk '{u[$2]=($3>u[$2]?$3:u[$2]); if(!($2 in a)||$4<a[$2])a[$2]=$4; s[$2]=($5>s[$2]?$5:s[$2])} END{for(h in u) printf "%s used %.1f avail-min %.1f swap %.1f\n", h, u[h]/1024, a[h]/1024, s[h]/1024}' mem.log | sort
+echo "== pkdgrav3 memory report"; grep -a -i -E "Memory Models|memory \(GB\)|Particle.*size|nStore|bytes per particle" run.log | head -8
+echo "== timings"
+grep -a -E "IC Generation Complete|Domain Decomposition complete|Tree built|Gravity Calculated|Writing .*compressed|Compressed .* particles|successfully written|Calculating Gravity, Step:[0-9]+\.000000" run.log | head -60
+echo "== snap.timing (s per step: Step Gravity IO Tree DomainDecom ... Drift)"; cat snap.timing 2>/dev/null | grep -v "^#"
+echo "== last lines"; tail -5 run.log
+du -sh $D; rm -rf $D
+echo "done $(date -Is)"
