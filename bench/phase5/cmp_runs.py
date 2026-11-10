@@ -42,6 +42,14 @@ def main(a, b):
         same &= frac == 0
         print(f"  {name:9s}: differ for {100*frac:.4f}% of particles; max {int(n.max())} steps; "
               f"> 1 step: {100*np.mean(n > 1):.4f}%")
+    if "pot" in A and "pot" in B:  # the particles with the largest potential difference
+        n = rows[-1][1]
+        for i in np.argsort(n)[::-1][:5]:
+            dxi = np.abs(dx[i]).max() * h["q"]
+            print(f"    id {A['ids'][i]}: pot {A['pot'][i]:.6g} vs {B['pot'][i]:.6g} (km/s)^2; "
+                  f"pos diff {dxi:.0f} steps; |v| {np.linalg.norm(A['vel'][i]):.1f} vs {np.linalg.norm(B['vel'][i]):.1f} km/s")
+        for name, x in (("A", A["pot"]), ("B", B["pot"])):
+            print(f"    pot {name}: min {x.min():.6g} median {np.median(x):.6g} max {x.max():.6g} (km/s)^2")
     print("  IDENTICAL" if same else "  DIFFERENT")
     return 0
 

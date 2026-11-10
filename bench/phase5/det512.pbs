@@ -1,0 +1,35 @@
+#!/bin/bash -l
+# Phase 5b control: is an uninterrupted 512^3 run reproducible? Runs chk512's reference again (same
+# parameter file, same staging of snapshots and checkpoints) as ref2 and compares ref vs ref2 at steps 30
+# and 40, next to ref vs int (restarted) from chk512. If ref vs ref2 differs as much as ref vs int, the
+# differences come from multithreaded summation order, not from the restart.
+# Needs bench/chk512 from job chk512 (ref, int, p.par).
+# qsub -v PKD_IO_ROOT=/storage/shadab/pkdgrav3_io/fresh bench/phase5/det512.pbs
+#PBS -N det512
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=120gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+W=${PKD_IO_ROOT:-/storage/shadab/pkdgrav3_io}; export PKD_IO_ROOT=$W
+SRC=$W/pkdgrav3
+B=$W/bench/chk512
+H=/user/shadab/pkdgrav3_io_chk/det512_$J
+NTH=${NCPUS:-64}
+mkdir -p $W/bench/logs; exec > $W/bench/logs/det512.$J.log 2>&1
+source $SRC/bench/phase0/env_pawna.sh
+echo "host $(hostname) job $J $(date -Is) threads=$NTH"
+(cd $SRC && git log -1 --format="source %h %s")
+rm -rf $B/ref2; mkdir -p $B/ref2 $H; cp $SRC/examples/euclid_z0_transfer_combined.dat $B/ref2/
+env RUNDIR=$B/ref2 STAGING=1 CHKSTAGE=1 CHKDEST=$H/ref2 KEEPCHK=2 NTH=$NTH PAR=$B/p.par PBS_JOBID=${J}r.pawna \
+    bash $SRC/tools/staging/run_staged.pbs; echo "ref2 rc=$?"
+grep -a -E "Elapsed|Maximum resident" $B/ref2/time.${J}r.log
+for s in 00030 00040; do
+  echo "== snap.$s: ref vs ref2 (both uninterrupted)"
+  $W/venv/bin/python $SRC/bench/phase5/cmp_runs.py $B/ref/snapshots/snap.$s $B/ref2/snapshots/snap.$s
+  echo "== snap.$s: ref vs int (restarted at step 25)"
+  $W/venv/bin/python $SRC/bench/phase5/cmp_runs.py $B/ref/snapshots/snap.$s $B/int/snapshots/snap.$s
+done
+rm -rf $H
+echo "done $(date -Is)"
