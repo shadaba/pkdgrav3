@@ -67,7 +67,7 @@ compressed, parallel snapshot format to pkdgrav3:
 
 - sahyadri-sandbox `code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/` holds only the files Aseem
   patched (see `scripts/rockstar/readme_aseem.txt`: AREPO/HDF5 reader for Gadget-4, TIRPC guards, curvature
-  term); the rest is upstream Rockstar at bitbucket.org/gfcstanford/rockstar commit 36ce9eea36ee.
+  term); It also has recent changes for dark energy equation of state added in this commit: 2d9cbf0ca701fe1e7a3b20bb53c615a27fbb7723; the rest is upstream Rockstar at bitbucket.org/gfcstanford/rockstar commit 36ce9eea36ee.
 - On pawna, pkdgrav3 runs are processed from TIPSY output (`FILE_FORMAT = "TIPSY"`, IDs from file order),
   one Rockstar call per snapshot (`scripts/run_rockstar_batch.sh` in a colleague's clone; config like
   `config/halos/rockstar_n1024_tipsy.cfg`). Production directories of other users are read-only.

@@ -16,7 +16,7 @@ if [ ! -d env ]; then
   conda create -y -q -p "$ROOT/env" --override-channels -c conda-forge \
     python=3.11 "numpy<2" "cython>=3" dill tomli h5py zstandard \
     c-compiler cxx-compiler make cmake pkg-config git \
-    "openmpi=5" "fftw=*=mpi_openmpi*" "hdf5=*=nompi*" gsl "libboost-devel" libhwloc zstd
+    "openmpi=5" "fftw=*=mpi_openmpi*" "hdf5=*=nompi*" gsl "libboost-devel" libhwloc zstd zlib
 fi
 conda activate "$ROOT/env"
 python -c "import numpy, Cython, dill, tomli, h5py, zstandard; print('env ok: numpy', numpy.__version__, 'Cython', Cython.__version__)"
