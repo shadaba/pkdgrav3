@@ -7,6 +7,8 @@ Sahyadri's readers.py.
     s = PkcSnapshot("snapshots/snap.00100")            # all <prefix>.s*.pkc files of one snapshot
     s.redshift, s.scale, s.Lbox, s.npart, s.mpart, s.Om, s.Olam, s.hubble, s.percents
     d = s.read(subsamples=[1, 3])                       # dict: pos (n,3) Mpc/h in [0, L), vel (n,3) km/s, ids
+    d = s.read(fields=("pos", "pot"))                   # pot (n,): peculiar potential in (km/s)^2, if stored
+    s.has_potential, s.pot_step
     pos = s.read_block("pos", subsamples=[1])           # SnapshotReader style: (3, n); "vel" (3, n); "ids" (n,)
     for pos, vel, ids in s.iter_blocks():               # streaming, one block (<= 65536 particles) at a time
         ...
@@ -32,6 +34,8 @@ _HEADER_MAGIC = b"PKCOMP\x00\x01"
 _TRAILER_MAGIC = b"PKCIDX\x00\x01"
 _BLOCK_MAGIC = b"PKB1"
 ID_RAW, ID_DELTA_IN_CELL, ID_LAGRANGIAN = 0, 1, 2
+K_POT = 8
+POT_OFFSET = 4080  # version 2: pot_step, pot_to_kms2 (doubles); the info text ends before it
 RHO_CRIT = 2.77536627e11  # Msun/h per (Mpc/h)^3
 
 _FIELDS = [  # (offset, struct code, name)
@@ -48,11 +52,16 @@ def parse_header(b):
     if bytes(b[:8]) != _HEADER_MAGIC:
         raise ValueError("not a snapcomp file")
     version, hsize = struct.unpack_from("<II", b, 8)
-    if version != 1 or hsize != HEADER_SIZE:
+    if version not in (1, 2) or hsize != HEADER_SIZE:
         raise ValueError(f"unsupported version {version} / header size {hsize}")
     h = {name: struct.unpack_from("<" + code, b, off)[0] for off, code, name in _FIELDS}
+    h["version"] = version
     h["percents"] = list(struct.unpack_from("<16d", b, 128))[: h["n_subsamples"]]
-    h["info"] = bytes(b[288:HEADER_SIZE]).split(b"\x00", 1)[0].decode(errors="replace")
+    end = POT_OFFSET if version >= 2 else HEADER_SIZE
+    h["info"] = bytes(b[288:end]).split(b"\x00", 1)[0].decode(errors="replace")
+    h["pot_step"], h["pot_to_kms2"] = struct.unpack_from("<2d", b, POT_OFFSET) if version >= 2 else (0.0, 1.0)
+    if version >= 2 and not h["pot_step"] > 0:
+        raise ValueError("version 2 header without a potential step")
     h["q"] = h["ncell"] * h["sub"]
     return h
 
@@ -64,6 +73,11 @@ def _unzigzag(u):
 
 def decode_block(h, b):
     """Decode one block: integer positions X (n,3), velocities V (n,3) in vel_step units, IDs (n)."""
+    return decode_block_full(h, b)[:3]
+
+
+def decode_block_full(h, b):
+    """As decode_block, plus the potential P (n,) in pot_step units (None if the file has none)."""
     if bytes(b[:4]) != _BLOCK_MAGIC:
         raise ValueError("bad block magic")
     n, n_cells, ns, coder = struct.unpack_from("<IIBB", b, 4)
@@ -107,7 +121,15 @@ def decode_block(h, b):
         raise ValueError(f"unknown ID coder {coder}")
     if len(ids) != n:
         raise ValueError("block particle count mismatch")
-    return X, V, ids.astype(np.uint64)
+    P = None
+    if h["pot_step"] > 0:
+        k = 8 + (3 if coder == ID_LAGRANGIAN else 1)
+        if ns != k + 1 or struct.unpack_from("<B", b, 16 + 12 * k + 1)[0] != K_POT:
+            raise ValueError("expected a potential stream")
+        P = np.cumsum(_unzigzag(streams[k]))
+    elif ns != 8 + (3 if coder == ID_LAGRANGIAN else 1):
+        raise ValueError("unexpected stream count")
+    return X, V, ids.astype(np.uint64), P
 
 
 class PKCFile:
@@ -131,9 +153,11 @@ class PKCFile:
         self.index = list(zip(self.offsets.tolist(), self.sizes.tolist(), self.counts.tolist()))  # (offset, size, n)
         self.percent = self.header["percents"][self.header["subsample"]]
 
-    def block(self, i):
+    def block(self, i, pot=False):
+        """(X, V, ids) of block i; with pot=True also P (potential in pot_step units, None if absent)."""
         o, s = int(self.offsets[i]), int(self.sizes[i])
-        return decode_block(self.header, memoryview(self._mm)[o:o + s])
+        r = decode_block_full(self.header, memoryview(self._mm)[o:o + s])
+        return r if pot else r[:3]
 
     def blocks(self):
         for i in range(len(self.offsets)):
@@ -178,6 +202,8 @@ class PkcSnapshot:
         self.mpart = RHO_CRIT * self.Om * self.Lbox**3 / self.npart  # Msun/h
         self.percents = h["percents"]
         self.lattice_n = h["lattice_n"]
+        self.has_potential = h["pot_step"] > 0
+        self.pot_step = h["pot_step"]  # (km/s)^2, max error is half of it
         got = sum(f.header["n_particles"] for f in self.files)
         if got != self.npart:
             raise ValueError(f"{prefix}: files hold {got} particles, header says {self.npart} (missing files?)")
@@ -194,7 +220,9 @@ class PkcSnapshot:
         return int(sum(f.header["n_particles"] for f in self._select(subsamples)))
 
     def read(self, fields=("pos", "vel", "ids"), subsamples=None, units="mpc", dtype=np.float32):
-        """Return a dict of the requested fields for the chosen subsamples (percents)."""
+        """Return a dict of the requested fields ("pos", "vel", "ids", "pot") for the chosen subsamples (percents)."""
+        if "pot" in fields and not self.has_potential:
+            raise ValueError(f"{self.prefix}: no potential stored (written with dCompPotStep = 0)")
         files = self._select(subsamples)
         jobs, start = [], 0
         for f in files:
@@ -208,11 +236,15 @@ class PkcSnapshot:
             out["vel"] = np.empty((start, 3), dtype)
         if "ids" in fields:
             out["ids"] = np.empty(start, np.uint64)
+        if "pot" in fields:
+            out["pot"] = np.empty(start, dtype)
 
         def work(job):
             f, i, s, n = job
             h = f.header
-            X, V, ids = f.block(i)
+            X, V, ids, P = f.block(i, pot=True)
+            if "pot" in out:
+                out["pot"][s:s + n] = P * h["pot_step"]
             if "pos" in out:
                 x = (X + 0.5) / h["q"]
                 out["pos"][s:s + n] = x - 0.5 if units == "box" else x * h["box_size"]
@@ -228,9 +260,9 @@ class PkcSnapshot:
 
     def read_block(self, block="pos", subsamples=None):
         """SnapshotReader-style: pos and vel as (3, n), ids as (n,)."""
-        name = {"pos": "pos", "vel": "vel", "ids": "ids"}[block]
+        name = {"pos": "pos", "vel": "vel", "ids": "ids", "pot": "pot"}[block]
         a = self.read(fields=(name,), subsamples=subsamples)[name]
-        return a if name == "ids" else a.T
+        return a if name in ("ids", "pot") else a.T
 
     def iter_blocks(self, subsamples=None, units="mpc"):
         """Yield (pos (n,3), vel (n,3), ids) per block, in the same order as read()."""

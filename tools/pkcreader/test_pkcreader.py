@@ -78,6 +78,22 @@ def main(h5, gadget=None):
                 f"position error {np.abs(dx).max()*1e3:.4f} kpc/h <= half step {0.5*L/Q*1e3:.4f}")
     ok &= check(np.abs(dv).max() <= 0.5 * h["vel_step"] * (1 + 1e-6) + 1e-4,
                 f"velocity error {np.abs(dv).max():.4f} km/s <= half step {0.5*h['vel_step']}")
+    if s.has_potential:
+        import h5py
+        with h5py.File(h5, "r") as f:
+            U = float(f["Units"].attrs["KmPerSecUnit"])
+            phi = f["PartType1/Potential"][:].astype(np.float64)
+        p = s.read(fields=("pot", "ids"), dtype=np.float64)
+        ok &= check(np.array_equal(p["ids"], ids), "potential: same order as the other fields")
+        pref = phi[j] * U * U * s.scale ** -1  # code potential -> peculiar (km/s)^2
+        ok &= check(abs(h["pot_to_kms2"] / (U * U / s.scale) - 1) < 1e-9, "potential: header unit = KmPerSecUnit^2 / a")
+        err = np.abs(p["pot"] - pref).max()
+        # the HDF5 value is float32 of the code value: allow its rounding as well
+        tol = 0.5 * s.pot_step * (1 + 1e-6) + 2 * np.abs(pref).max() * 2.0**-24
+        ok &= check(err <= tol, f"potential error {err:.2f} (km/s)^2 <= half step {0.5*s.pot_step:g} (+ float32 rounding)")
+        ok &= check(np.array_equal(s.read_block("pot"), p["pot"].astype(np.float32)), "read_block('pot') = read()")
+    else:
+        print("  (no potential in these files)")
     ok &= check(d["pos"].min() >= 0 and d["pos"].max() < L, "positions in [0, L)")
 
     p32 = s.read_block("pos")

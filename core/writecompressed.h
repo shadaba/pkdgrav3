@@ -19,6 +19,7 @@ struct WriteCompressedStats {
     std::uint64_t nWritten = 0;      // particles written
     std::uint64_t nSkipped = 0;      // non-dark particles (not written)
     std::uint64_t nBytes = 0;        // compressed block bytes
+    std::uint64_t nPotBytes = 0;     // of which the potential stream
     double dEncode = 0;              // thread-seconds in the encoder (sum)
     double dWrite = 0;               // thread-seconds in appends (sum)
     double dMaxThread = 0;           // slowest thread, seconds
@@ -31,6 +32,7 @@ struct WriteCompressedStats {
         nWritten += r.nWritten;
         nSkipped += r.nSkipped;
         nBytes += r.nBytes;
+        nPotBytes += r.nPotBytes;
         dEncode += r.dEncode;
         dWrite += r.dWrite;
         dMaxThread = std::max(dMaxThread, r.dMaxThread);
@@ -60,6 +62,8 @@ class ServiceWriteCompressed : public TraverseCount<WriteCompressedStats> {
         std::int32_t iLevel;
         std::int32_t iWriteThrough; // -1 auto (if MemAvailable < 2x this process's snapshot), 0 off, 1 on
         double dBytesPerProcess;    // estimated compressed bytes per process, for the auto decision
+        double dPotStep;            // (km/s)^2; 0 = no potential
+        double dPotToKms2;          // code potential -> peculiar potential in (km/s)^2
     };
     static constexpr std::string_view name = "WriteCompressed";
     explicit ServiceWriteCompressed(PST pst, std::string_view service_name = name) : TraverseCount(pst, service_name, sizeof(input)) {}

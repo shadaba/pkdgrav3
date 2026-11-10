@@ -22,8 +22,9 @@ const char HEADER_MAGIC[8] = {'P', 'K', 'C', 'O', 'M', 'P', 0, 1};
 const char TRAILER_MAGIC[8] = {'P', 'K', 'C', 'I', 'D', 'X', 0, 1};
 const char BLOCK_MAGIC[4] = {'P', 'K', 'B', '1'};
 constexpr size_t BLOCK_HEADER = 16, STREAM_ENTRY = 12, INDEX_ENTRY = 32, TRAILER = 32, INFO_OFFSET = 288;
+constexpr size_t POT_OFFSET = 4080; // pot_step, pot_to_kms2 (version 2); the info text ends before it
 
-enum StreamKind : uint8_t { K_CELLKEY = 1, K_COUNT = 2, K_OFFSET = 3, K_VEL = 4, K_ID_RAW = 5, K_ID_DELTA = 6, K_ID_LAGR = 7 };
+enum StreamKind : uint8_t { K_CELLKEY = 1, K_COUNT = 2, K_OFFSET = 3, K_VEL = 4, K_ID_RAW = 5, K_ID_DELTA = 6, K_ID_LAGR = 7, K_POT = 8 };
 
 template <typename T> void put(uint8_t* b, size_t off, T v) {
     std::memcpy(b + off, &v, sizeof(T));
@@ -62,7 +63,7 @@ int width_for(uint64_t maxv) {
 void Header::pack(uint8_t* b) const {
     std::memset(b, 0, HEADER_SIZE);
     std::memcpy(b, HEADER_MAGIC, 8);
-    put<uint32_t>(b, 8, FORMAT_VERSION);
+    put<uint32_t>(b, 8, has_potential() ? FORMAT_VERSION : 1u);
     put<uint32_t>(b, 12, HEADER_SIZE);
     put<uint64_t>(b, 16, n_particles);
     put<uint64_t>(b, 24, n_blocks);
@@ -87,13 +88,18 @@ void Header::pack(uint8_t* b) const {
     put<uint32_t>(b, 272, block_size);
     put<int32_t>(b, 276, zstd_level);
     put<uint64_t>(b, 280, step);
-    size_t n = std::min(info.size(), size_t(HEADER_SIZE - INFO_OFFSET - 1));
+    size_t n = std::min(info.size(), size_t(POT_OFFSET - INFO_OFFSET - 1));
     std::memcpy(b + INFO_OFFSET, info.data(), n);
+    if (has_potential()) {
+        put<double>(b, POT_OFFSET, pot_step);
+        put<double>(b, POT_OFFSET + 8, pot_to_kms2);
+    }
 }
 
 Header Header::unpack(const uint8_t* b) {
     check(std::memcmp(b, HEADER_MAGIC, 8) == 0, "not a snapcomp file (bad header magic)");
-    check(get<uint32_t>(b, 8) == FORMAT_VERSION, "unsupported format version");
+    const uint32_t version = get<uint32_t>(b, 8);
+    check(version == 1 || version == 2, "unsupported format version");
     check(get<uint32_t>(b, 12) == HEADER_SIZE, "unexpected header size");
     Header h;
     h.n_particles = get<uint64_t>(b, 16);
@@ -120,7 +126,12 @@ Header Header::unpack(const uint8_t* b) {
     h.zstd_level = get<int32_t>(b, 276);
     h.step = get<uint64_t>(b, 280);
     const char* s = reinterpret_cast<const char*>(b + INFO_OFFSET);
-    h.info.assign(s, strnlen(s, HEADER_SIZE - INFO_OFFSET));
+    if (version >= 2) {
+        h.pot_step = get<double>(b, POT_OFFSET);
+        h.pot_to_kms2 = get<double>(b, POT_OFFSET + 8);
+        check(h.pot_step > 0, "version 2 header without a potential step");
+    }
+    h.info.assign(s, strnlen(s, (version >= 2 ? POT_OFFSET : HEADER_SIZE) - INFO_OFFSET));
     check(h.ncell > 0 && h.sub > 0 && h.vel_step > 0, "invalid grid or velocity step in header");
     return h;
 }
@@ -179,6 +190,7 @@ struct BlockEncoder::Impl {
     };
     std::vector<Rec> rec;
     std::vector<int64_t> X, V;   // 3n, unsorted
+    std::vector<int64_t> P;      // n, unsorted (potential)
     std::vector<uint64_t> tmp;   // stream values
     std::vector<uint8_t> planes; // byte planes of one stream
     struct Stream {
@@ -223,8 +235,8 @@ BlockEncoder::BlockEncoder(const Header& h) : p(new Impl) {
 
 size_t BlockEncoder::scratch_bytes() const {
     const Impl& s = *p;
-    size_t b = s.rec.capacity() * sizeof(Impl::Rec) + (s.X.capacity() + s.V.capacity()) * sizeof(int64_t) + s.tmp.capacity() * sizeof(uint64_t) +
-               s.planes.capacity() + s.out.capacity();
+    size_t b = s.rec.capacity() * sizeof(Impl::Rec) + (s.X.capacity() + s.V.capacity() + s.P.capacity()) * sizeof(int64_t) +
+               s.tmp.capacity() * sizeof(uint64_t) + s.planes.capacity() + s.out.capacity();
     for (const auto* v : {&s.streams, &s.idbest, &s.idtry})
         for (const auto& x : *v) b += x.data.capacity();
     return b + ZSTD_sizeof_CCtx(s.cctx);
@@ -235,10 +247,11 @@ BlockEncoder::~BlockEncoder() {
     delete p;
 }
 
-const std::vector<uint8_t>& BlockEncoder::encode(size_t n, const double* pos, const float* vel, const uint64_t* ids) {
+const std::vector<uint8_t>& BlockEncoder::encode(size_t n, const double* pos, const float* vel, const uint64_t* ids, const float* pot) {
     check(n >= 1 && n <= 0xffffffffu, "block must hold 1 .. 2^32-1 particles");
     Impl& s = *p;
     const Header& h = s.h;
+    check(h.has_potential() == (pot != nullptr), "potential given without pot_step in the header, or missing");
     const int64_t Q = int64_t(h.q()), sub = h.sub, nc = h.ncell;
     const double vfac = h.vel_to_kms / h.vel_step;
     s.X.resize(3 * n);
@@ -253,6 +266,11 @@ const std::vector<uint8_t>& BlockEncoder::encode(size_t n, const double* pos, co
             s.V[3 * i + d] = std::llrint(double(vel[3 * i + d]) * vfac);
         }
         s.rec[i] = {uint64_t((c[2] * nc + c[1]) * nc + c[0]), ids[i], uint32_t(i)};
+    }
+    if (pot) {
+        const double pfac = h.pot_to_kms2 / h.pot_step;
+        s.P.resize(n);
+        for (size_t i = 0; i < n; ++i) s.P[i] = std::llrint(double(pot[i]) * pfac);
     }
     std::sort(s.rec.begin(), s.rec.end(), [](const Impl::Rec& a, const Impl::Rec& b) { return a.key < b.key || (a.key == b.key && a.id < b.id); });
 
@@ -336,6 +354,17 @@ const std::vector<uint8_t>& BlockEncoder::encode(size_t n, const double* pos, co
         }
     }
     for (auto& x : s.idbest) s.streams.push_back(std::move(x));
+    // potential: difference to the previous particle in block order (the potential is smooth in space)
+    if (pot) {
+        v.resize(n);
+        int64_t last = 0;
+        for (size_t j = 0; j < n; ++j) {
+            int64_t q = s.P[s.rec[j].i];
+            v[j] = zigzag(q - last);
+            last = q;
+        }
+        s.make_stream(s.streams, K_POT, v);
+    }
 
     // assemble
     size_t size = BLOCK_HEADER + STREAM_ENTRY * s.streams.size();
@@ -359,7 +388,7 @@ const std::vector<uint8_t>& BlockEncoder::encode(size_t n, const double* pos, co
         std::memcpy(b + data, x.data.data(), x.data.size());
         data += x.data.size();
         size_t t = x.data.size() + STREAM_ENTRY;
-        (x.kind <= K_OFFSET ? stats.pos : x.kind == K_VEL ? stats.vel : stats.id) += t;
+        (x.kind <= K_OFFSET ? stats.pos : x.kind == K_VEL ? stats.vel : x.kind == K_POT ? stats.pot : stats.id) += t;
         stats.raw_bytes += size_t(x.count) * x.width;
     }
     stats.pos += BLOCK_HEADER;
@@ -396,7 +425,8 @@ void decode_block(const Header& h, const uint8_t* b, size_t size, Block& out) {
     check(size >= BLOCK_HEADER && std::memcmp(b, BLOCK_MAGIC, 4) == 0, "bad block magic");
     const uint32_t n = get<uint32_t>(b, 4), n_cells = get<uint32_t>(b, 8);
     const int ns = get<uint8_t>(b, 12), coder = get<uint8_t>(b, 13);
-    const int expect = 8 + (coder == ID_LAGRANGIAN ? 3 : 1);
+    const int n_id = coder == ID_LAGRANGIAN ? 3 : 1;
+    const int expect = 8 + n_id + (h.has_potential() ? 1 : 0);
     check(ns == expect && coder <= ID_LAGRANGIAN, "unexpected stream count or ID coder");
     check(size >= BLOCK_HEADER + STREAM_ENTRY * size_t(ns), "block truncated (stream table)");
     std::vector<std::vector<uint64_t>> st(ns);
@@ -404,6 +434,7 @@ void decode_block(const Header& h, const uint8_t* b, size_t size, Block& out) {
     size_t off = BLOCK_HEADER, data = BLOCK_HEADER + STREAM_ENTRY * ns;
     for (int k = 0; k < ns; ++k) {
         int w = get<uint8_t>(b, off);
+        if (k == 8 + n_id) check(get<uint8_t>(b, off + 1) == K_POT, "expected the potential stream");
         uint32_t count = get<uint32_t>(b, off + 4), cs = get<uint32_t>(b, off + 8);
         check(count == (k < 2 ? n_cells : n), "stream count mismatch");
         check(data + cs <= size, "block truncated (stream data)");
@@ -458,6 +489,13 @@ void decode_block(const Header& h, const uint8_t* b, size_t size, Block& out) {
             out.id[i] = (uint64_t(q[2]) * N + uint64_t(q[1])) * N + uint64_t(q[0]);
         }
     }
+    out.P.clear();
+    if (h.has_potential()) {
+        const auto& sp = st[8 + n_id];
+        out.P.resize(n);
+        int64_t last = 0;
+        for (size_t i = 0; i < n; ++i) out.P[i] = last += unzigzag(sp[i]);
+    }
 }
 
 void Block::positions(const Header& h, std::vector<double>& x) const {
@@ -469,6 +507,11 @@ void Block::positions(const Header& h, std::vector<double>& x) const {
 void Block::velocities(const Header& h, std::vector<double>& v) const {
     v.resize(V.size());
     for (size_t i = 0; i < V.size(); ++i) v[i] = double(V[i]) * h.vel_step;
+}
+
+void Block::potentials(const Header& h, std::vector<double>& p) const {
+    p.resize(P.size());
+    for (size_t i = 0; i < P.size(); ++i) p[i] = double(P[i]) * h.pot_step;
 }
 
 // ---------------------------------------------------------------------------------------------

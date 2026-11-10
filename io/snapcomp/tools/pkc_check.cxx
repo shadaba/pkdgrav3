@@ -84,8 +84,9 @@ int main(int argc, char** argv) {
     const uint64_t N = h0.lattice_n, ntot = h0.n_total, Q = h0.q();
     if (N == 0 || N * N * N != ntot) throw std::runtime_error("pkc_check needs lattice IDs (lattice_n^3 == n_total)");
     SubsampleTable table(h0.percents, int(h0.n_subsamples), h0.subsample_seed);
-    std::printf("%s: %zu files, N=%llu^3, z=%.4f, writers=%u, subsamples=%u, grid %ux%u (dx %.4f kpc/h), dv %g km/s\n", prefix.c_str(), paths.size(),
-                (unsigned long long)N, h0.redshift, h0.n_writers, h0.n_subsamples, h0.ncell, h0.sub, h0.box_size * 1e3 / double(Q), h0.vel_step);
+    std::printf("%s: %zu files, N=%llu^3, z=%.4f, writers=%u, subsamples=%u, grid %ux%u (dx %.4f kpc/h), dv %g km/s, %s\n", prefix.c_str(), paths.size(),
+                (unsigned long long)N, h0.redshift, h0.n_writers, h0.n_subsamples, h0.ncell, h0.sub, h0.box_size * 1e3 / double(Q), h0.vel_step,
+                h0.has_potential() ? ("potential dphi " + std::to_string(h0.pot_step) + " (km/s)^2").c_str() : "no potential");
 
     // ---- pass 1: every ID once, membership, lattice offsets
     std::vector<std::atomic<uint64_t>> bits((ntot + 63) / 64);

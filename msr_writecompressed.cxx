@@ -50,6 +50,11 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
     in.dLambda = csm->val.dLambda;
     in.dHubble = csm->val.h;
     in.dVelStep = parameters.get_dCompVelStep();
+    // Potential: comoving code units (G = 1, box = 1); peculiar physical potential = phi * U^2 / a with U the
+    // code velocity unit in km/s (checked on Mac snapshots: <v^2>/well depth is then independent of a).
+    in.dPotStep = parameters.get_dCompPotStep();
+    in.dPotToKms2 = std::pow(L * 100.0 / csm->val.dHubble0, 2) / a;
+    if (in.dPotStep < 0) throw std::runtime_error("compressed output: dCompPotStep must be >= 0");
     in.nTotal = N;
     in.iSeed = uint64_t(parameters.get_iCompSubsampleSeed());
     in.nBlock = uint32_t(parameters.get_iCompBlockSize());
@@ -70,12 +75,13 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
     if (in.nBlock < 1) throw std::runtime_error("compressed output: iCompBlockSize must be >= 1");
     snapcomp::choose_grid(L * 1000.0, parameters.get_dCompPosStep(), N, in.nCell, in.nSub);
 
-    std::string info = fmt::format("{{\"code\":\"pkdgrav3 {}\",\"pos_step_kpch_requested\":{},\"vel_step_kms\":{},\"name\":\"{}\"}}", PACKAGE_VERSION,
-                                   parameters.get_dCompPosStep(), in.dVelStep, FileName);
+    std::string info = fmt::format("{{\"code\":\"pkdgrav3 {}\",\"pos_step_kpch_requested\":{},\"vel_step_kms\":{},\"pot_step_kms2\":{},\"name\":\"{}\"}}",
+                                   PACKAGE_VERSION, parameters.get_dCompPosStep(), in.dVelStep, in.dPotStep, FileName);
     std::strncpy(in.achInfo, info.c_str(), sizeof(in.achInfo) - 1);
 
-    print_detail("Writing {name} in compressed format in parallel ({files} files per process, dx {dx:.4g} kpc/h, dv {dv:g} km/s) ...\n", "name"_a = FileName,
-                 "files"_a = pc.size(), "dx"_a = L * 1e3 / (double(in.nCell) * in.nSub), "dv"_a = in.dVelStep);
+    print_detail("Writing {name} in compressed format in parallel ({files} files per process, dx {dx:.4g} kpc/h, dv {dv:g} km/s{pot}) ...\n",
+                 "name"_a = FileName, "files"_a = pc.size(), "dx"_a = L * 1e3 / (double(in.nCell) * in.nSub), "dv"_a = in.dVelStep,
+                 "pot"_a = in.dPotStep > 0 ? fmt::format(", potential dphi {:g} (km/s)^2", in.dPotStep) : std::string());
     print_detail("Time:{time:g} Redshift:{z:g}\n", "time"_a = dTime, "z"_a = in.dRedshift);
 
     TimerStart(TIMER_IO);
@@ -90,6 +96,9 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
                  "thread {mx:.2f} s\n",
                  "n"_a = out.nWritten, "mb"_a = out.nBytes / 1e6, "bpp"_a = out.nWritten ? double(out.nBytes) / out.nWritten : 0.0, "enc"_a = out.dEncode,
                  "app"_a = out.dWrite, "mx"_a = out.dMaxThread);
+    if (in.dPotStep > 0)
+        print_detail("  of which potential: {mb:.1f} MB ({bpp:.3f} B/particle)\n", "mb"_a = out.nPotBytes / 1e6,
+                     "bpp"_a = out.nWritten ? double(out.nPotBytes) / out.nWritten : 0.0);
     print_detail("Compressed output scratch memory: {tot:.1f} MB over all threads, {mx:.1f} MB per thread (freed after the write)\n",
                  "tot"_a = out.nScratch / 1e6, "mx"_a = out.nScratchMax / 1e6);
     print_detail("Compressed output write-through (page cache bypassed): {on} of {n} threads; node MemAvailable {gb:.1f} GiB, iCompWriteThrough {m}\n",

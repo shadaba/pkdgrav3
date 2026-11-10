@@ -144,6 +144,11 @@ int ServiceWriteCompressed::Service(PST pst, void* vin, int nIn, void* vout, int
         h.zstd_level = in.iLevel;
         h.step = in.iStep;
         h.info.assign(in.achInfo, strnlen(in.achInfo, sizeof in.achInfo));
+        h.pot_step = in.dPotStep;
+        h.pot_to_kms2 = in.dPotToKms2;
+        const bool with_pot = h.has_potential();
+        if (with_pot && !pkd->particles.present(PKD_FIELD::oPotential))
+            throw std::runtime_error("dCompPotStep > 0 needs the potential in memory (bMemPotential)");
 
         snapcomp::SubsampleTable table(in.dPercents, int(in.nPercents), in.iSeed);
         snapcomp::BlockEncoder enc(h);
@@ -151,9 +156,11 @@ int ServiceWriteCompressed::Service(PST pst, void* vin, int nIn, void* vout, int
         std::vector<double> bp;
         std::vector<float> bv;
         std::vector<uint64_t> bi;
+        std::vector<float> bf;
         bp.reserve(3 * B);
         bv.reserve(3 * B);
         bi.reserve(B);
+        if (with_pot) bf.reserve(B);
         const double dvFac = in.dvFac;
         const unsigned thread = unsigned(mdl->Core());
 
@@ -172,14 +179,15 @@ int ServiceWriteCompressed::Service(PST pst, void* vin, int nIn, void* vout, int
             auto flush = [&] {
                 if (bi.empty()) return;
                 auto e0 = clock::now();
-                const auto& blk = enc.encode(bi.size(), bp.data(), bv.data(), bi.data());
+                const auto& blk = enc.encode(bi.size(), bp.data(), bv.data(), bi.data(), with_pot ? bf.data() : nullptr);
                 auto e1 = clock::now();
                 w->append(blk.data(), blk.size(), uint32_t(bi.size()), thread);
                 out.dEncode += std::chrono::duration<double>(e1 - e0).count();
                 out.dWrite += std::chrono::duration<double>(clock::now() - e1).count();
                 out.nBytes += blk.size();
+                out.nPotBytes += enc.stats.pot;
                 out.nWritten += bi.size();
-                bp.clear(), bv.clear(), bi.clear();
+                bp.clear(), bv.clear(), bi.clear(), bf.clear();
             };
             // One pass per subsample keeps the scratch to a single block.
             for (auto& p : pkd->particles) {
@@ -200,12 +208,14 @@ int ServiceWriteCompressed::Service(PST pst, void* vin, int nIn, void* vout, int
                     bv.push_back(float(v[d] * dvFac));
                 }
                 bi.push_back(id);
+                if (with_pot) bf.push_back(p.potential());
                 if (bi.size() == B) flush();
             }
             flush();
             if (release(path) && k + 1 == in.nPercents) write_marker(in.achPrefix, in.nPercents, mdl->Proc());
         }
-        out.nScratch = enc.scratch_bytes() + bp.capacity() * sizeof(double) + bv.capacity() * sizeof(float) + bi.capacity() * sizeof(uint64_t);
+        out.nScratch = enc.scratch_bytes() + bp.capacity() * sizeof(double) + bv.capacity() * sizeof(float) + bi.capacity() * sizeof(uint64_t) +
+                       bf.capacity() * sizeof(float);
         out.nScratchMax = out.nScratch;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "ERROR: compressed output on thread %d: %s\n", mdl->Self(), e.what());

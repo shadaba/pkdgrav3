@@ -481,6 +481,17 @@ flag="compdv"
 default=2.44
 help="compressed output: velocity step in km/s (max error is half of it)"
 
+["I/O Parameters".dCompPotStep]
+flag="compdphi"
+default=0.0
+help="compressed output: also store the gravitational potential (peculiar, in (km/s)^2) with this step; 0 = do not store it"
+docs='''
+Max error is half the step. 100 (km/s)^2 costs about 0.8-1.5 B/particle (Mac test, docs section 17) and is far
+below the kinetic-energy error from the velocity step (about 370 (km/s)^2 at 300 km/s for 2.44 km/s). Needs
+the potential in memory (bMemPotential, on by default when gravity is on); it is computed for every
+particle at the top-level step boundaries where snapshots are written.
+'''
+
 ["I/O Parameters".lstCompSubsamples]
 flag="compsub"
 default=[1.0]

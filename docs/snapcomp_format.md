@@ -1,4 +1,7 @@
-# snapcomp file format, version 1
+# snapcomp file format, versions 1 and 2
+
+Version 2 = version 1 plus the gravitational potential (two header fields, one stream per block). A
+file without the potential is written as version 1, byte for byte as before. Readers accept both.
 
 Compressed dark-matter snapshot written in parallel by pkdgrav3 threads (Option A of
 [compressed_io_plan.md](compressed_io_plan.md)). Reference implementation: `io/snapcomp/`
@@ -26,7 +29,7 @@ end - 32      trailer     32 bytes
 | offset | type | name | meaning |
 |---|---|---|---|
 | 0 | char[8] | magic | `PKCOMP\0\1` |
-| 8 | u32 | version | 1 |
+| 8 | u32 | version | 1, or 2 if the potential is stored |
 | 12 | u32 | header_size | 4096 |
 | 16 | u64 | n_particles | particles in this file |
 | 24 | u64 | n_blocks | blocks in this file |
@@ -51,9 +54,11 @@ end - 32      trailer     32 bytes
 | 272 | u32 | block_size | maximum particles per block |
 | 276 | i32 | zstd_level | |
 | 280 | u64 | step | simulation step |
-| 288 | char[...] | info | free text (NUL-terminated), e.g. JSON with code version and parameters |
+| 288 | char[...] | info | free text (NUL-terminated), e.g. JSON with code version and parameters; ends before 4080 in version 2 |
+| 4080 | f64 | pot_step | version 2 only: potential quantum, (km/s)^2 (> 0) |
+| 4088 | f64 | pot_to_kms2 | version 2 only: factor from the writer's potential unit to (km/s)^2 |
 
-Position step = box / (ncell * sub); velocity step = vel_step km/s.
+Position step = box / (ncell * sub); velocity step = vel_step km/s; potential step = pot_step (km/s)^2.
 
 ### Block
 
@@ -91,12 +96,16 @@ Streams in order (`kind` value in brackets):
 | 8 | 5 | n | id_coder 0: IDs as they are |
 | 8 | 6 | n | id_coder 1: zigzag of ID differences (see below) |
 | 8-10 | 7 | n | id_coder 2: zigzag of Lagrangian residual x, y, z |
+| last | 8 | n | version 2 only: potential, zigzag of the difference to the previous particle in block order (0 before the first) |
 
 Particles in a block are sorted by cell key, then by ID. Decoding, for particle j in cell c:
 
 - cell key `k = (cz*ncell + cy)*ncell + cx`; integer position `X = c*sub + offset` (per dimension, in
   `[0, ncell*sub)`); position in box units `x = (X + 0.5)/(ncell*sub) - 0.5`; in Mpc/h multiply by box_size.
 - velocity `v = V * vel_step` km/s (peculiar).
+- potential (version 2): `P_j = P_{j-1} + unzigzag(u_j)` with `P_{-1} = 0`; `phi = P * pot_step` in (km/s)^2.
+  This is the peculiar gravitational potential in physical units (pkdgrav3: code potential * U^2 / a, with
+  U the code velocity unit in km/s); its zero point is pkdgrav3's (periodic, mean density removed).
 - id_coder 1: the stream holds `d_j = id_j - id_{j-1}` inside a cell and, for the first particle of a
   cell, `id_first(c) - id_first(previous cell)` (previous first ID = 0 for the first cell).
 - id_coder 2 (needs lattice_n = N > 0): `l = floor(X*N/(ncell*sub))` per dimension (Eulerian position in

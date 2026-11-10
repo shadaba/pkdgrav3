@@ -248,6 +248,85 @@ static void test_header() {
 }
 
 // Many threads append to one file; the reader must return every particle exactly once.
+// Optional potential: version 2 header, exact quantization, error <= step/2, smaller than raw floats;
+// files without it stay version 1 and the encoder refuses a potential the header does not announce.
+static void test_potential(const std::string& dir) {
+    Header h = make_header(64, 50, 2.44, 64);
+    Parts p = lattice_parts(64, 2.0, 300, 7);
+    const size_t n = p.id.size();
+    std::vector<float> pot(n); // smooth field + small noise, in a writer unit of 10 (km/s)^2
+    std::mt19937_64 rng(3);
+    std::normal_distribution<double> g(0, 1);
+    for (size_t i = 0; i < n; ++i) {
+        const double* x = &p.pos[3 * i];
+        pot[i] = float(-3e4 * (1 + std::cos(6.283 * x[0]) * std::cos(6.283 * x[1]) * std::cos(6.283 * x[2])) + 50 * g(rng));
+    }
+    std::vector<uint8_t> hb(HEADER_SIZE);
+    h.pack(hb.data());
+    CHECK(hb[8] == 1 && !Header::unpack(hb.data()).has_potential());
+    bool threw = false;
+    try {
+        BlockEncoder e0(h);
+        e0.encode(10, p.pos.data(), p.vel.data(), p.id.data(), pot.data());
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    CHECK(threw);
+
+    h.pot_step = 100;
+    h.pot_to_kms2 = 10;
+    h.info = std::string(5000, 'x'); // must not run into the potential fields
+    h.pack(hb.data());
+    Header u = Header::unpack(hb.data());
+    CHECK(hb[8] == 2 && u.pot_step == 100 && u.pot_to_kms2 == 10 && u.info.size() == 4080 - 288 - 1);
+    h.info.clear();
+
+    const std::string path = dir + "/snapcomp_pot.pkc";
+    BlockEncoder enc(h);
+    size_t bytes = 0, pbytes = 0;
+    {
+        FileWriter w(path, h);
+        for (size_t s = 0; s < n; s += 65536) {
+            size_t m = std::min<size_t>(65536, n - s);
+            auto& out = enc.encode(m, &p.pos[3 * s], &p.vel[3 * s], &p.id[s], &pot[s]);
+            w.append(out.data(), out.size(), uint32_t(m));
+            bytes += out.size();
+            pbytes += enc.stats.pot;
+        }
+        w.close();
+    }
+    FileReader r(path);
+    CHECK(r.header().has_potential() && r.header().pot_step == 100);
+    Block b;
+    std::vector<double> ph;
+    double emax = 0;
+    bool exact = true;
+    size_t seen = 0;
+    for (size_t i = 0; i < r.n_blocks(); ++i) {
+        r.read_block(i, b);
+        b.potentials(r.header(), ph);
+        CHECK(ph.size() == b.size());
+        seen += b.size();
+    }
+    // the input is shuffled, so map ID -> input index
+    std::vector<size_t> at(n);
+    for (size_t i = 0; i < n; ++i) at[p.id[i]] = i;
+    for (size_t i = 0; i < r.n_blocks(); ++i) {
+        r.read_block(i, b);
+        b.potentials(r.header(), ph);
+        for (size_t k = 0; k < b.size(); ++k) {
+            const double truth = double(pot[at[b.id[k]]]) * 10;
+            exact = exact && b.P[k] == std::llrint(truth / 100);
+            emax = std::max(emax, std::fabs(ph[k] - truth));
+        }
+    }
+    CHECK(seen == n && exact && emax <= 50 * (1 + 1e-9));
+    CHECK(double(pbytes) / n < 2.0);
+    unlink(path.c_str());
+    std::printf("  potential: version 2 header, %zu particles, max err %.1f (km/s)^2 for step 100, %.2f B/particle for the potential, %.2f in all\n", n, emax,
+                double(pbytes) / n, double(bytes) / n);
+}
+
 static void test_file_threads(const std::string& dir) {
     Header h = make_header(32, 64, 1.0, 32);
     h.n_total = 32 * 32 * 32;
@@ -326,6 +405,7 @@ int main(int argc, char** argv) {
     roundtrip(h, lattice_parts(64, 4.0, 500, 2), 65536, "lattice, large displacement");
     roundtrip(h, lattice_parts(64, 4.0, 500, 2), 1000, "lattice, block 1000");
     test_file_threads(dir);
+    test_potential(dir);
     test_speed();
     std::printf(failures ? "FAILED: %d checks\n" : "all tests passed\n", failures);
     return failures ? 1 : 0;

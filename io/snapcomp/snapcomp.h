@@ -1,4 +1,5 @@
-/*  snapcomp: compressed, parallel snapshot output for N-body particles (ID, position, velocity).
+/*  snapcomp: compressed, parallel snapshot output for N-body particles (ID, position, velocity and,
+ *  optionally, gravitational potential).
  *
  *  Self-contained: depends only on the C++17 standard library, POSIX and zstd; no pkdgrav3 headers.
  *  File format: docs/snapcomp_format.md.
@@ -28,7 +29,7 @@
 
 namespace snapcomp {
 
-constexpr uint32_t FORMAT_VERSION = 1;
+constexpr uint32_t FORMAT_VERSION = 2; // written only when the potential is stored; otherwise 1 (same bytes as before)
 constexpr uint32_t HEADER_SIZE = 4096;
 constexpr int MAX_SUBSAMPLES = 16;
 
@@ -53,7 +54,11 @@ struct Header {
     uint32_t block_size = 65536;
     int32_t zstd_level = 3;
     uint64_t step = 0;
-    std::string info; // free text, at most HEADER_SIZE-289 bytes
+    double pot_step = 0;    // (km/s)^2; 0 = no potential stored (version 1 file)
+    double pot_to_kms2 = 1; // writer potential unit -> peculiar potential in (km/s)^2
+    std::string info;       // free text, at most 4080-289 bytes
+
+    bool has_potential() const { return pot_step > 0; }
 
     uint64_t q() const { return uint64_t(ncell) * sub; } // position steps per box length
 
@@ -85,16 +90,17 @@ class BlockEncoder {
     BlockEncoder& operator=(const BlockEncoder&) = delete;
 
     /// Encode n >= 1 particles. pos: 3n doubles in box units (periodic, wrapped into [-0.5, 0.5));
-    /// vel: 3n floats in the writer's unit (converted with vel_to_kms); ids: n values.
+    /// vel: 3n floats in the writer's unit (converted with vel_to_kms); ids: n values;
+    /// pot: n floats in the writer's unit (converted with pot_to_kms2), required iff h.has_potential().
     /// Returns the block bytes, valid until the next call.
-    const std::vector<uint8_t>& encode(size_t n, const double* pos, const float* vel, const uint64_t* ids);
+    const std::vector<uint8_t>& encode(size_t n, const double* pos, const float* vel, const uint64_t* ids, const float* pot = nullptr);
 
     /// Heap bytes held by this encoder (capacity of its buffers), for memory accounting.
     size_t scratch_bytes() const;
 
     /// Bytes per particle of the last block, per stream group (pos, vel, id) and the ID coder used.
     struct Stats {
-        size_t pos = 0, vel = 0, id = 0, total = 0;
+        size_t pos = 0, vel = 0, id = 0, pot = 0, total = 0;
         int id_coder = 0;
         size_t raw_bytes = 0; // uncompressed stream bytes given to zstd
     } stats;
@@ -109,10 +115,12 @@ struct Block {
     std::vector<int64_t> X; // 3n quantized positions in [0, ncell*sub)
     std::vector<int64_t> V; // 3n quantized velocities (units of vel_step)
     std::vector<uint64_t> id;
+    std::vector<int64_t> P; // n quantized potentials (units of pot_step); empty if not stored
     int id_coder = 0;
     size_t size() const { return id.size(); }
     void positions(const Header& h, std::vector<double>& x) const;  // box units [-0.5, 0.5)
     void velocities(const Header& h, std::vector<double>& v) const; // km/s
+    void potentials(const Header& h, std::vector<double>& p) const; // peculiar potential, (km/s)^2
 };
 void decode_block(const Header& h, const uint8_t* data, size_t size, Block& out); // throws on corruption
 
