@@ -451,6 +451,28 @@ Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check 
   /storage/swarajit/pkdgrav3_sims/pkdgrav3_n2048_sahyadri, gaps between restarts removed), ~80,000
   core-h at 192 threads: the potential adds ~0.06% (~0.1-0.15% of compute alone).
 
+### Implemented (2026-11-10, commit 9f07c9a6)
+- `dCompPotStep` (flag `compdphi`, (km/s)^2, default 0 = off). Format version 2 (docs/snapcomp_format.md):
+  header `pot_step`, `pot_to_kms2` at 4080/4088, one stream per block (kind 8, zigzag delta in block
+  order). Files without the potential are version 1, byte for byte as before. Readers: C++ `Block::P` /
+  `potentials()`, Python `PkcSnapshot.read(fields=("pot",))`, `has_potential`, `pot_step`.
+- Unit conversion `phi_code * U^2 / a` (U = code velocity unit in km/s) checked on the section-11 snapshots:
+  <v^2> of the 1000 particles around the deepest well over the well depth (ring at 2-3x their radius) is
+  2.00 / 2.04 / 2.54 at z = 3 / 1 / 0 with 1/a; with no factor or with a it drifts by 4x and 16x.
+- Mac test (128^3, 12.5 Mpc/h = production mass resolution, 50 steps z = 49 -> 0, 12 threads, 13.3 min,
+  compressed + HDF5 of the same states, dCompPotStep = 100): `test_pkcreader.py` against the HDF5
+  `Potential` at z = 3, 1, 0: error <= 50.00 (km/s)^2 (half step), same order as the other fields,
+  header unit = KmPerSecUnit^2/a; all other checks unchanged. Bytes from the files' stream tables:
+
+  | z | all fields | potential | on top of the rest |
+  |---|---|---|---|
+  | 3 | 8.05 B/particle | 1.15 | 16.7% |
+  | 1 | 8.45 | 1.17 | 16.1% |
+  | 0 | 8.57 | 1.20 | 16.2% |
+
+  (Higher than the 0.8 of the prototype estimate: the 9 subsample files thin out neighbours.)
+- pawna 512^3 run with checkpoints and a restart (section 19) uses dCompPotStep = 100.
+
 ## 18. Run-time estimate: 2048^3, 200 Mpc/h, z = 49 -> 0, 100 snapshots, one pawna node (2026-11-10)
 From the production run's file timestamps (`ls --time-style=+%s` of
 /storage/swarajit/pkdgrav3_sims/pkdgrav3_n2048_sahyadri; its logs and snap.timing are not readable):
