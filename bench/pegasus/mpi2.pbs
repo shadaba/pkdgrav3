@@ -1,0 +1,35 @@
+#!/bin/bash -l
+# pegasus multi-node test (debug queue, 2 nodes x 32 cores, ~5 min): 128^3 at production mass resolution
+# (L = 12.5 Mpc/h), z = 49 -> 12 in 6 steps (bench/phase4/p4.par.in), ordered-mode IDs, compressed output with
+# the potential plus HDF5 of the same states. 4 MPI processes (one per socket) x 16 threads, Open MPI over UCX
+# (InfiniBand; forced with --mca pml ucx so it fails instead of falling back to TCP).
+# Checks: pkc_check on every snapshot (4 writers), test_pkcreader against HDF5 at z = 12.
+# qsub -v PKD_IO_ROOT=/data/project/hpc2502016/shadab/pkdgrav3_io bench/pegasus/mpi2.pbs
+#PBS -N pkd_mpi2
+#PBS -q debug
+#PBS -l select=2:ncpus=32:mpiprocs=2:mem=64gb
+#PBS -l place=scatter
+#PBS -l walltime=00:30:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+W=${PKD_IO_ROOT:-/data/project/hpc2502016/shadab/pkdgrav3_io}; export PKD_IO_ROOT=$W
+SRC=$W/pkdgrav3
+D=$W/bench/mpi2_$J
+mkdir -p $W/bench/logs; exec > $W/bench/logs/mpi2.$J.log 2>&1
+source $SRC/tools/pegasus/env_pegasus.sh
+echo "job $J $(date -Is) nodes: $(sort -u $PBS_NODEFILE | tr '\n' ' ')"
+(cd $SRC && git log -1 --format="source %h %s")
+ucx_info -d | grep -E "Transport|Device" | paste - - | grep -v -E "cuda|self|cma|posix|sysv|xpmem" | sort -u | head
+mkdir -p $D; cd $D; cp $SRC/examples/euclid_z0_transfer_combined.dat .
+sed -e "s/@N@/128/" -e "s/@L@/12.5/" $SRC/bench/phase4/p4.par.in > p.par
+printf 'dCompPotStep = 100.0\nbCompAlsoStandard = True\n' >> p.par
+/usr/bin/time -v mpirun -np 4 --hostfile $PBS_NODEFILE --map-by ppr:2:node --bind-to none --mca pml ucx \
+    $mpirun_pegasus_args $W/build/pkdgrav3 -sz 16 p.par > run.log 2> time.log; echo "rc=$?"
+grep -a -E "Writing .*compressed|Compressed .* particles|of which potential|successfully written|ERROR|rror" run.log | head -30
+grep -E "Elapsed|Maximum resident" time.log; grep -v -E "^\s|^Command" time.log | head -10
+for s in 00001 00003 00006; do
+  echo "== pkc_check snap.$s"; $W/build_snapcomp/pkc_check --threads 32 --ref snap.00001 snap.$s | grep -E "files|IDs|persistence|CHECK"
+done
+echo "== test_pkcreader z = 12"; python $SRC/tools/pkcreader/test_pkcreader.py snap.00006 | tail -3
+echo "done $(date -Is)"
