@@ -433,3 +433,24 @@ Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check 
   Production 2048^3 took ~17.4 days of running on one node (file timestamps of
   /storage/swarajit/pkdgrav3_sims/pkdgrav3_n2048_sahyadri, gaps between restarts removed), ~80,000
   core-h at 192 threads: the potential adds ~0.06% (~0.1-0.15% of compute alone).
+
+## 18. Run-time estimate: 2048^3, 200 Mpc/h, z = 49 -> 0, 100 snapshots, one pawna node (2026-11-10)
+From the production run's file timestamps (`ls --time-style=+%s` of
+/storage/swarajit/pkdgrav3_sims/pkdgrav3_n2048_sahyadri; its logs and snap.timing are not readable):
+- Production: 2020 steps, a snapshot every 20 steps, a checkpoint every 200. 17.9 days from the start of
+  the first log (Oct 18 21:49) to the last snapshot, including ~0.5 d of gaps between restarts.
+- Snapshot-to-snapshot interval (20 steps + one HDF5 write): median 2.98 h, 2.85 h after step 1000;
+  4.8-5.4 h at high z (smaller opening angle). Intervals with a checkpoint: 6.4-8.7 h, i.e. ~4.5 h more.
+- A 173 GB HDF5 snapshot at the measured NFS 25-30 MB/s is 1.6-1.9 h, so compute is ~1.0-1.25 h per 20
+  steps late in the run (~3-4 min per step).
+- Split of the 17.9 d: snapshot writes ~7.4 d (101 x ~1.75 h), checkpoints ~1.9 d, gaps ~0.5 d,
+  compute ~8 d.
+Estimate with compressed output staged on the local SSD + background drain:
+- Compute ~8 d (unchanged) + snapshot stall 100 x 1-1.5 min ~2-3 h (+~0.25 h with the potential).
+- Checkpoints written to NFS as today: +1.9 d -> **~10 days**. Checkpoints staged and drained like the
+  snapshots (~400 GB each, minutes on the SSD; the 4-5 h drain fits in the ~10-12 h between checkpoints,
+  if the SSD has room for one checkpoint + one snapshot): **~8-8.5 days**. ~37,000-46,000 core-h at 192.
+- Drain: ~75-85 GB per late snapshot (8.5-9.5 B/particle with subsamples and potential) at 25 MB/s is
+  50-60 min, against ~60-75 min of compute between snapshots: it keeps up, with little margin.
+- Uncertain: the production HDF5 write time is inferred, not measured; the thread count of the
+  production run is not known to me (192 assumed); our 2048^3 test runs with ~40 GB in swap.
