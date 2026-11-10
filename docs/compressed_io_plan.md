@@ -528,3 +528,28 @@ Estimate with compressed output staged on the local SSD + background drain:
   50-60 min, against ~60-75 min of compute between snapshots: it keeps up, with little margin.
 - Uncertain: the production HDF5 write time is inferred, not measured; the thread count of the
   production run is not known to me (192 assumed); our 2048^3 test runs with ~40 GB in swap.
+
+## 20. Estimate: 2580^3 and 3250^3 on one node (2026-11-10)
+2580^3 = 1.72e10 particles (2.00x 2048^3), 3250^3 = 3.43e10 (4.00x).
+- Memory, measured at 2048^3 (job 2536432, ordered mode, no ID field, `mem.2536432.log` sampled every 15 s):
+  pkdgrav3 allocates 732 GB within 30 s of start (particle store with `dExtraStore`, tree, buffers) and peaks at
+  801.6 GB RSS during the first gravity step, with 25-43 GB more in swap: about 98 B/particle needed in total.
+  Memory scales with N:
+
+  | | particles | RAM needed (98 B/p) | with `bMemIntegerPosition` (~78 B/p) | RAM to buy (+15%) |
+  |---|---|---|---|---|
+  | 2048^3 | 8.59e9 | 0.84 TB | 0.67 TB | 1 TB |
+  | 2580^3 | 1.72e10 | 1.68 TB | 1.34 TB | 2 TB (1.5 TB with integer positions, tight) |
+  | 3250^3 | 3.43e10 | 3.36 TB | 2.68 TB | 4 TB (3 TB with integer positions, tight) |
+
+  The integer-position saving (19.6 B/particle) was measured at 256^3 on the Mac (memory_persistent_ids.md)
+  and checked against the compressed writer; not yet in a full-length run.
+- Run time (one node, 192 threads, scaled from the ~8 d compute of 2048^3 in section 18; RAM adds no speed):
+  same mass resolution (box 252 / 317 Mpc/h): cost ~ N log N, 2.06x and 4.2x: **~17 d** and **~34 d**.
+  Same 200 Mpc/h box (finer mass): more particles in deep timestep rungs, guessed +20-50% more:
+  **~20-25 d** and **~40-55 d**. Uncertain by at least +-25%.
+- Output (100 snapshots, 8.5 B/particle late, +16% with the potential at every snapshot): ~146 / ~290 GB per
+  snapshot, 14-17 / 29-34 TB per run. Drain at 25 MB/s: 1.6 / 3.2 h per snapshot, against ~4 / ~8 h between
+  snapshots: keeps up.
+- Checkpoints (48 B/particle): 0.82 / 1.65 TB. 3250^3 does not fit the 1.4 TB local SSD for staging: write
+  checkpoints straight to home (0.27-0.49 GB/s: 1-1.7 h each) or add NVMe.
