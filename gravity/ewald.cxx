@@ -249,7 +249,7 @@ double pkdParticleEwald(PKD pkd, double* r, float* pa, float* pPot, double* pdFl
         dax += tax;
         day += tay;
         daz += taz;
-        dPot -= tpot;
+        dPot += tpot; /* evalEwaldSIMD already subtracts (as for full vectors above); was -=, flipping the sign of the potential of the leftover images */
         nSIMD = 0;
     }
 #endif

@@ -1,0 +1,44 @@
+#!/bin/bash -l
+# Ewald potential fix (gravity/ewald.cxx: sign of the leftover SIMD images' potential). 128^3, L = 12.5 Mpc/h
+# (production mass resolution), z = 49 -> 13 in 10 steps (nReplicas 2 above z = 20, as production), compressed
+# with the potential (step 1 (km/s)^2), 64 threads, same parameters with the binary before the fix (old) and
+# after (new). Expect: positions and velocities identical (forces unchanged), potential outliers gone.
+# Needs $W/build/pkdgrav3.pre_ewaldfix (copy of the old binary).
+# qsub -v PKD_IO_ROOT=/storage/shadab/pkdgrav3_io/fresh bench/phase5/ewfix.pbs
+#PBS -N ewfix
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=32gb
+#PBS -l walltime=01:00:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+W=${PKD_IO_ROOT:-/storage/shadab/pkdgrav3_io}; export PKD_IO_ROOT=$W
+SRC=$W/pkdgrav3
+B=$W/bench/ewfix
+mkdir -p $W/bench/logs; exec > $W/bench/logs/ewfix.$J.log 2>&1
+source $SRC/bench/phase0/env_pawna.sh
+echo "host $(hostname) job $J $(date -Is)"; (cd $SRC && git log -1 --format="source %h %s")
+lscpu | grep -o -E "avx512f|avx2" | sort -u | tr '\n' ' '; echo
+rm -rf $B; mkdir -p $B
+for v in old new; do
+  mkdir -p $B/$v; cp $SRC/examples/euclid_z0_transfer_combined.dat $B/$v/
+  sed -e "s/@N@/128/" -e "s/@L@/12.5/" $SRC/bench/phase4/p4.par.in | grep -v "^nSteps\|^dRedTo\|^iOutInterval\|^bHDF5" > $B/$v/p.par
+  printf 'nSteps = 10\ndRedTo = 13.0\niOutInterval = 5\ndCompPotStep = 1.0\nbHDF5 = False\n' >> $B/$v/p.par
+done
+cd $B/old && mpirun --bind-to none -np 1 -x PYTHONPATH $W/build/pkdgrav3.pre_ewaldfix -sz 64 p.par > run.log 2>&1; echo "old rc=$?"
+cd $B/new && mpirun --bind-to none -np 1 -x PYTHONPATH $W/build/pkdgrav3 -sz 64 p.par > run.log 2>&1; echo "new rc=$?"
+for s in 00005 00010; do
+  echo "== snap.$s old vs new"; $W/venv/bin/python $SRC/bench/phase5/cmp_runs.py $B/old/snap.$s $B/new/snap.$s
+done
+cd $B && $W/venv/bin/python - <<'PY'
+import sys, numpy as np
+sys.path.insert(0, "/storage/shadab/pkdgrav3_io/fresh/pkdgrav3/tools/pkcreader")
+from pkcreader import PkcSnapshot
+for v in ("old", "new"):
+    for s in ("00005", "00010"):
+        S = PkcSnapshot(f"{v}/snap.{s}"); p = S.read(fields=("pot",), dtype=np.float64)["pot"]; m = np.median(p)
+        print(f"{v} snap.{s} z={S.redshift:.2f}: median {m:.5g}, 0.1% {np.percentile(p,0.1):.5g}, min {p.min():.5g}, "
+              f"below 10x median: {100*np.mean(p < 10*m):.4f}%  (self term -293/a = {-293*(1+S.redshift):.0f})")
+PY
+rm -rf $B
+echo "done $(date -Is)"
