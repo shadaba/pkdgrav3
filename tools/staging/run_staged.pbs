@@ -1,10 +1,11 @@
 #!/bin/bash -l
-# Run pkdgrav3 on pawna with snapshots staged on node-local SSD and drained to NFS during the run.
-# Logs and checkpoints are written in RUNDIR (NFS) as usual; only snapshots go via local disk.
+# Run pkdgrav3 on pawna with snapshots (and, with CHKSTAGE=1, checkpoints) staged on node-local SSD and
+# drained to NFS during the run. Logs stay in RUNDIR (NFS).
 #
 # Usage (all settings via -v; RUNDIR and one of PAR / RESTART are required):
 #   fresh:    qsub -v RUNDIR=/storage/shadab/runs/test512,PAR=test512.par tools/staging/run_staged.pbs
 #   restart:  qsub -v RUNDIR=/storage/shadab/runs/test512,RESTART=snap.00100.chk tools/staging/run_staged.pbs
+#             (RESTART relative to RUNDIR or absolute, e.g. $CHKDEST/snap.00100.chk)
 # Options (defaults in brackets):
 #   PAR      parameter file for a fresh start, relative to RUNDIR or absolute
 #   RESTART  checkpoint to restart from (writes `import PKDGRAV; PKDGRAV.restore(...)`; the
@@ -20,6 +21,10 @@
 #   MINFREE  local free GB below which new snapshots go straight to NFS  [200]
 #   H5LEVEL  if set, force HDF5 gzip level via tools/h5shim (0 = no gzip, 1 = production)
 #   STAGING  1 = stage on local disk, 0 = write snapshots straight to DEST  [1]
+#   CHKSTAGE 1 = also stage checkpoints and drain them to CHKDEST (needs STAGING=1); 0 = checkpoints go
+#            where the parameter file says (RUNDIR by default)                     [0]
+#   CHKDEST  final checkpoint directory; may be another file server (e.g. home)  [$RUNDIR/checkpoints]
+#   KEEPCHK  keep only the newest K complete checkpoints in CHKDEST, 0 = all      [2]
 # Edit the #PBS lines (or override with qsub -l) for size and walltime. Leave pkdgrav3's
 # iWallRunTime (minutes) below the PBS walltime by at least one snapshot drain time.
 #PBS -N pkd_staged
@@ -39,6 +44,8 @@ NTH=${NTH:-${NCPUS:-64}}
 DEST=${DEST:-$RUNDIR/snapshots}
 STAGE=${STAGE:-/var/tmp/${USER}_stage_$(basename "$RUNDIR")}
 BW=${BW:-0}; MINFREE=${MINFREE:-200}; STAGING=${STAGING:-1}
+CHKSTAGE=${CHKSTAGE:-0}; CHKDEST=${CHKDEST:-$RUNDIR/checkpoints}; KEEPCHK=${KEEPCHK:-2}
+[ "$CHKSTAGE" = 1 ] && [ "$STAGING" != 1 ] && { echo "CHKSTAGE=1 needs STAGING=1"; exit 1; }
 DRAIN=$SRC/tools/staging/pkd_drain.py
 
 cd "$RUNDIR" || exit 1
@@ -46,11 +53,12 @@ exec > "$RUNDIR/staged.$J.log" 2>&1        # PBS -o copy-back is unreliable on p
 source "$ENVSH"
 echo "host $(hostname)  job $PBS_JOBID  $(date -Is)"
 echo "BIN=$BIN NTH=$NTH PAR=${PAR:-} RESTART=${RESTART:-} DEST=$DEST STAGE=$STAGE STAGING=$STAGING BW=$BW MINFREE=$MINFREE H5LEVEL=${H5LEVEL:-unset}"
-df -h /var/tmp "$RUNDIR" | sed 1d
+echo "CHKSTAGE=$CHKSTAGE CHKDEST=$CHKDEST KEEPCHK=$KEEPCHK"
+df -h /var/tmp "$RUNDIR" | sed 1d; [ "$CHKSTAGE" = 1 ] && { mkdir -p "$CHKDEST"; df -h "$CHKDEST" | sed 1d; }
 
 # Snapshot path: local staging (drained) or straight to DEST.
 if [ "$STAGING" = 1 ]; then
-  python3 "$DRAIN" --stage "$STAGE" --dest "$DEST" --init-only
+  python3 "$DRAIN" --stage "$STAGE" --dest "$DEST" --chk-dest "$CHKDEST" --init-only
   IOPATH="$STAGE/current/{name}.{step:05d}{type}"
 else
   mkdir -p "$DEST"; IOPATH="$DEST/{name}.{step:05d}{type}"
@@ -58,10 +66,16 @@ fi
 # Parameter file for this job (the original is not touched). A checkpoint stores achIoPath, so on
 # restart it is passed explicitly; STAGE is per run, not per job, so it matches anyway.
 P=$RUNDIR/.staged.$J.par
+CPPATH="$STAGE/chk/{name}.{step:05d}{type}"
 if [ -n "${RESTART:-}" ]; then
-  printf 'import PKDGRAV\nPKDGRAV.restore("%s", achIoPath="%s")\n' "$RESTART" "$IOPATH" > "$P"
+  if [ "$CHKSTAGE" = 1 ]; then
+    printf 'import PKDGRAV\nPKDGRAV.restore("%s", achIoPath="%s", achCheckpointPath="%s")\n' "$RESTART" "$IOPATH" "$CPPATH" > "$P"
+  else
+    printf 'import PKDGRAV\nPKDGRAV.restore("%s", achIoPath="%s")\n' "$RESTART" "$IOPATH" > "$P"
+  fi
 else
   cp "$PAR" "$P"; echo "achIoPath = \"$IOPATH\"" >> "$P"
+  [ "$CHKSTAGE" = 1 ] && echo "achCheckpointPath = \"$CPPATH\"" >> "$P"
 fi
 echo "== job parameter file $P:"; tail -3 "$P"
 
@@ -76,7 +90,8 @@ PKD=$!
 
 DRC=0
 if [ "$STAGING" = 1 ]; then
-  nice -n 19 ionice -c 3 python3 "$DRAIN" --stage "$STAGE" --dest "$DEST" --log "$RUNDIR/run.$J.log" \
+  nice -n 19 ionice -c 3 python3 "$DRAIN" --stage "$STAGE" --dest "$DEST" --chk-dest "$CHKDEST" --keep-chk "$KEEPCHK" \
+       --log "$RUNDIR/run.$J.log" \
        --pid $PKD --bwlimit "$BW" --min-free-gb "$MINFREE" --poll 10 --report "$RUNDIR/drain.$J.log"
   DRC=$?
 fi
@@ -84,14 +99,15 @@ wait $PKD; PRC=$?
 echo "pkdgrav3 rc=$PRC  drain rc=$DRC  $(date -Is)"
 grep -E "Maximum resident|Elapsed" "$RUNDIR/time.$J.log"
 echo "== snapshot write (stall) times:"; grep "Output file has been successfully written" "$RUNDIR/run.$J.log"
-[ "$STAGING" = 1 ] && { echo "== drain:"; grep -E "drained|current ->|ERROR|LEFT|all drained" "$RUNDIR/drain.$J.log"; }
+echo "== checkpoint write (stall) times:"; grep "Checkpoint has been successfully written" "$RUNDIR/run.$J.log"
+[ "$STAGING" = 1 ] && { echo "== drain:"; grep -E "drained|current ->|chk ->|deleted old|ERROR|LEFT|all drained" "$RUNDIR/drain.$J.log"; }
 
 if [ "$STAGING" = 1 ]; then
   if [ $DRC -eq 0 ]; then
     rm -rf "$STAGE"
   else
     echo "WARNING: data left in $STAGE on $(hostname); NOT deleted. Copy it with:"
-    echo "  python3 $DRAIN --recover --stage $STAGE --dest $DEST   (in a job on $(hostname))"
+    echo "  python3 $DRAIN --recover --stage $STAGE --dest $DEST --chk-dest $CHKDEST   (in a job on $(hostname))"
   fi
 fi
 exit $PRC

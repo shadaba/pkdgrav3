@@ -1,0 +1,68 @@
+#!/bin/bash -l
+# Phase 5b: staged checkpoints, drained to another file server, and a restart from one.
+# 512^3 at production mass resolution (L = 50 Mpc/h), z = 49 -> 5 in 40 steps; compressed snapshots with
+# the potential (dCompPotStep = 100) and checkpoints every 10 steps, both written to node-local SSD by
+# tools/staging/run_staged.pbs (STAGING=1, CHKSTAGE=1) and drained: snapshots to /storage, checkpoints
+# to home (/user/shadab/pkdgrav3_io_chk), keeping the newest 2.
+#   ref: uninterrupted.
+#   int: a STOP file after step 24 makes pkdgrav3 write a checkpoint (and a snapshot) and exit; the run
+#        is restarted from that checkpoint as copied to home, and continues to step 40.
+# Then: snapshots 30 and 40 of ref vs int, particle by particle (cmp_runs.py); pkc_check of int's last
+# snapshot with persistence against its first (IDs across the restart); checkpoint directory listing.
+# qsub -v PKD_IO_ROOT=/storage/shadab/pkdgrav3_io/fresh bench/phase5/chk512.pbs
+#PBS -N chk512
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=120gb
+#PBS -l walltime=04:00:00
+#PBS -j oe
+set -u
+J=${PBS_JOBID%%.*}
+W=${PKD_IO_ROOT:-/storage/shadab/pkdgrav3_io}; export PKD_IO_ROOT=$W
+SRC=$W/pkdgrav3
+B=$W/bench/chk512
+H=/user/shadab/pkdgrav3_io_chk/chk512_$J
+NTH=${NCPUS:-64}
+mkdir -p $W/bench/logs; exec > $W/bench/logs/chk512.$J.log 2>&1
+source $SRC/bench/phase0/env_pawna.sh
+echo "host $(hostname) job $J $(date -Is) threads=$NTH root=$W chkdest=$H"
+(cd $SRC && git log -1 --format="source %h %s")
+rm -rf $B; mkdir -p $B/ref $B/int $H
+sed -e "s/@N@/512/" -e "s/@L@/50.0/" $SRC/bench/phase4/p4.par.in > $B/p.par
+cat >> $B/p.par <<'EOF'
+nSteps          = 40
+dRedTo          = 5.0
+iOutInterval    = 10
+iCheckInterval  = 10
+dCompPotStep    = 100.0
+EOF
+for r in ref int; do cp $SRC/examples/euclid_z0_transfer_combined.dat $B/$r/; done
+STAGED="bash $SRC/tools/staging/run_staged.pbs"
+common() { echo RUNDIR=$B/$1 STAGING=1 CHKSTAGE=1 CHKDEST=$H/$1 KEEPCHK=2 NTH=$NTH; }
+
+echo "== ref: uninterrupted $(date -Is)"
+env $(common ref) PAR=$B/p.par PBS_JOBID=${J}r.pawna $STAGED; echo "ref rc=$?"
+
+echo "== int: stop after step 24 $(date -Is)"
+env $(common int) PAR=$B/p.par PBS_JOBID=${J}i.pawna $STAGED &
+S=$!
+until grep -a -q "Step:24.000000 (rung 0)" $B/int/run.${J}i.log 2>/dev/null || ! kill -0 $S 2>/dev/null; do sleep 5; done
+touch $B/int/STOP; echo "STOP written $(date -Is)"
+wait $S; echo "int (first part) rc=$?"
+RST=$(ls $H/int/*.chk | sort | tail -1)
+echo "== int: restart from $RST $(date -Is)"; ls -la $H/int
+env $(common int) RESTART=$RST PBS_JOBID=${J}j.pawna $STAGED; echo "int (restart) rc=$?"
+
+echo "== logs"
+for x in ${J}r ${J}i ${J}j; do
+  d=ref; [ $x != ${J}r ] && d=int
+  echo "-- $x"; sed -n '/^pkdgrav3 rc=/,$p' $B/$d/staged.$x.log
+  grep -a -E "Writing .* compressed|of which potential|Compressed .* particles|User interrupt|Checkpoint Restart Complete" $B/$d/run.$x.log
+done
+echo "== compare ref vs int (after the restart)"
+for s in 00030 00040; do $W/venv/bin/python $SRC/bench/phase5/cmp_runs.py $B/ref/snapshots/snap.$s $B/int/snapshots/snap.$s; done
+echo "== IDs across the restart"
+$W/build_snapcomp/pkc_check --threads $NTH --ref $B/int/snapshots/snap.00010 $B/int/snapshots/snap.00040
+echo "== checkpoint directories (keep 2)"; ls -la $H/ref $H/int; du -sh $H/ref $H/int
+ls $B/ref/snapshots | head -30; du -sh $B/ref/snapshots $B/int/snapshots
+rm -rf $H   # test checkpoints (home): deleted; the log above records them
+echo "done $(date -Is)"
