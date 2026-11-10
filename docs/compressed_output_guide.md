@@ -242,6 +242,11 @@ for pos, vel, ids in s.iter_blocks():        # streaming
     ...
 ```
 
+Units: positions comoving Mpc/h in [0, L), velocities peculiar km/s (v = a dx/dt), potential (km/s)^2, IDs u64,
+particle mass `s.info["box"]["particle_mass_msunh"]` Msun/h. `s.info` also has the simulation description (`sim`,
+`box`, `ic`, `cosmology` with values at the snapshot, `numerics`, `steps`); every field and unit is listed in
+[snapcomp_format.md](snapcomp_format.md).
+
 The stored potential includes pkdgrav3's constant softened self term, -(105/64) m/eps. At 2048^3 in
 200 Mpc/h this is -293/a (km/s)^2, the same for every particle. Subtract it before comparing with codes that
 leave it out [17].
