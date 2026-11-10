@@ -216,7 +216,14 @@ lstCompSubsamples  = [1, 3, 5, 9, 10, 12, 15, 20, 25]   # percent, sum 100; [100
 iCompSubsampleSeed = 0
 iCompBlockSize     = 65536           # particles per block (scratch about 150 B/particle per thread)
 iCompLevel         = 3               # zstd level
+iCompWriteThrough  = -1              # -1 auto, 0 off, 1 on (see below)
 ```
+
+Write-through: with it, each block waits until it is on disk and is dropped from the page cache, so a
+snapshot needs no free RAM, but the stall becomes the disk time (2048^3 to local SSD: 50 s; 512^3
+straight to NFS: 30-35 s instead of 1.5 s). Without it the page cache absorbs the write, which on a
+full node makes the kernel swap out simulation memory. Auto turns it on only when the node's
+MemAvailable is below twice the process's snapshot size (10 B/particle); the log says what it chose.
 
 Every thread compresses its own particles and writes in parallel; nothing is gathered. Each snapshot
 becomes `<name>.s<percent>.<process>.pkc` (one file per subsample and MPI process) and a

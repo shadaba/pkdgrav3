@@ -513,7 +513,8 @@ void FileWriter::append(const void* data, size_t size, uint32_t n_particles, uin
 #if defined(__linux__)
     // Write the block out now and drop it from the page cache. Without this, a large snapshot fills the
     // page cache and the kernel swaps out simulation memory to make room (seen at 2048^3 on a full node).
-    if (::sync_file_range(fd_, off_t(off), off_t(size), SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER) == 0)
+    if (write_through_ &&
+        ::sync_file_range(fd_, off_t(off), off_t(size), SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER) == 0)
         ::posix_fadvise(fd_, off_t(off), off_t(size), POSIX_FADV_DONTNEED);
 #endif
     std::lock_guard<std::mutex> lock(mtx_);

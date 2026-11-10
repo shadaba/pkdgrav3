@@ -54,6 +54,8 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
     in.iSeed = uint64_t(parameters.get_iCompSubsampleSeed());
     in.nBlock = uint32_t(parameters.get_iCompBlockSize());
     in.iLevel = int32_t(parameters.get_iCompLevel());
+    in.iWriteThrough = int32_t(parameters.get_iCompWriteThrough());
+    in.dBytesPerProcess = 10.0 * double(N) / double(mdl->Procs()); // generous: measured 5-9 B/particle
     auto n = uint64_t(std::llround(std::cbrt(double(N))));
     in.nLattice = (n * n * n == N) ? n : 0; // IDs from pkdgrav3 ICs are (iz*N+iy)*N+ix; blocks fall back if not
 
@@ -90,5 +92,8 @@ void MSR::WriteCompressed(std::string_view FileName, double dTime) {
                  "app"_a = out.dWrite, "mx"_a = out.dMaxThread);
     print_detail("Compressed output scratch memory: {tot:.1f} MB over all threads, {mx:.1f} MB per thread (freed after the write)\n",
                  "tot"_a = out.nScratch / 1e6, "mx"_a = out.nScratchMax / 1e6);
+    print_detail("Compressed output write-through (page cache bypassed): {on} of {n} threads; node MemAvailable {gb:.1f} GiB, iCompWriteThrough {m}\n",
+                 "on"_a = out.nWriteThrough, "n"_a = out.nThreads, "gb"_a = out.dMemAvailGB < 1e29 ? out.dMemAvailGB : -1.0,
+                 "m"_a = parameters.get_iCompWriteThrough());
     print_detail("Output file has been successfully written, Wallclock: {seconds:.5} secs.\n", "seconds"_a = dsec);
 }

@@ -359,6 +359,10 @@ Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check 
 - `pkc_check` z = 45: 8,589,934,592 IDs read, all distinct, none missing or out of range, all in the
   right subsample; distance from own lattice point rms 2.52 cells, max 6.91 (random IDs: ~1024).
   4 min 50 s, 1.3 GB RSS.
+- Side effect found with the 512^3 run of section 16 (straight to NFS, plenty of RAM): unconditional
+  write-through made the stall the NFS time (30-35 s instead of 1.4-1.9 s). Now a parameter,
+  `iCompWriteThrough` (-1 auto, 0, 1); auto uses it only when MemAvailable < 2x the process's snapshot
+  (10 B/particle), i.e. on for 2048^3 on one node, off for 512^3.
 - Time stepping: after z = 45 most particles are on rung 4 (16 full gravity passes of ~550 s per step),
   so z = 25 is due about 08:30 and z = 12 about 15:00-16:00 IST.
 
@@ -376,6 +380,15 @@ Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check 
   (half a step); read / read_block / iter_blocks give the same particles in the same order; 1% subsample
   is exactly the hashed set; Gadget files (1 and 6 files): totals, header, mass, IDs, positions and
   v*sqrt(a) equal to the reader's. All pass.
+- pawna, 512^3 in 200 Mpc/h to z = 0 (job 2536434, `bench/phase5/rs512.pbs`, 64 threads, 1 h 46 min,
+  RSS 25.0 GiB), compressed + HDF5 of the same states at z = 3, 2, 1, 0.5, 0, straight to NFS:
+  8.25 / 8.47 / 8.71 / 8.82 / 8.89 B/particle; HDF5 write 384-443 s; compressed stall 30-35 s (with
+  the unconditional write-through of that build, see section 15). `pkc_check`: all 134,217,728 IDs once
+  and in the right subsample at every redshift; the 1% set (1,342,802 IDs) is the same at all five;
+  displacement since z = 3 at z = 0: median 5.4, max 20.2 Mpc/h (random pairs ~96).
+  `test_pkcreader.py` at z = 0: all checks pass (position error 0.9794 kpc/h = half step + float32
+  rounding of the HDF5 file at L = 200; velocity 1.22 km/s); `pkc_to_gadget`: 9 files in 1.8 s
+  (64 threads, 4.3 GB RSS), read back equal. Snapshots kept in `fresh/bench/rs512/` for Rockstar.
 - Not done here: running Rockstar on converted files. Building Rockstar from the downloaded upstream
   source on the Mac was refused by the Claude Code permission check; needs the user's approval or the
   pawna build. Native Rockstar reading is planned in a separate session:

@@ -502,6 +502,19 @@ flag="complevel"
 default=3
 help="compressed output: zstd level"
 
+["I/O Parameters".iCompWriteThrough]
+flag="compwt"
+default=-1
+help="compressed output: write through to disk, bypassing the page cache (-1 auto, 0 off, 1 on)"
+docs='''
+With write-through every block waits until it is on disk and is then dropped from the page cache, so a
+snapshot needs no free RAM; the stall is then the disk time (about 50 s for 2048^3 on pawna's local SSD).
+Without it the kernel keeps the data in the page cache and writes it later; the stall is about 1-2 s,
+but on a node whose memory is full the kernel swaps out simulation memory instead (seen at 2048^3).
+Auto (-1) uses write-through when a process's MemAvailable is less than twice its estimated
+snapshot size (10 bytes per particle).
+'''
+
 ["I/O Parameters".bCompAlsoStandard]
 flag="compstd"
 default=false

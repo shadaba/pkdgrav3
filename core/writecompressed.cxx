@@ -35,14 +35,46 @@ struct Shared {
 std::mutex registry_mutex;
 std::map<std::string, Shared> registry;
 
-snapcomp::FileWriter* acquire(const std::string& path, const snapcomp::Header& h, int users) {
+snapcomp::FileWriter* acquire(const std::string& path, const snapcomp::Header& h, int users, bool write_through) {
     std::lock_guard<std::mutex> lock(registry_mutex);
     auto& e = registry[path];
     if (!e.w) {
         e.w = std::make_unique<snapcomp::FileWriter>(path, h);
+        e.w->set_write_through(write_through);
         e.users = users;
     }
     return e.w.get();
+}
+
+// MemAvailable from /proc/meminfo in GB (Linux); a huge value elsewhere.
+double mem_available_gb() {
+    double gb = 1e30;
+    if (FILE* f = std::fopen("/proc/meminfo", "r")) {
+        char line[256];
+        unsigned long long kb;
+        while (std::fgets(line, sizeof line, f))
+            if (std::sscanf(line, "MemAvailable: %llu kB", &kb) == 1) {
+                gb = double(kb) / (1024.0 * 1024.0);
+                break;
+            }
+        std::fclose(f);
+    }
+    return gb;
+}
+
+// Decided once per snapshot and process, by whichever thread gets here first.
+std::mutex decide_mutex;
+std::string decided_for;
+bool decided_through = false;
+double decided_avail = 1e30;
+bool write_through_for(const char* prefix, int mode, double bytes) {
+    std::lock_guard<std::mutex> lock(decide_mutex);
+    if (decided_for != prefix) {
+        decided_for = prefix;
+        decided_avail = mem_available_gb();
+        decided_through = mode == 1 || (mode < 0 && decided_avail * 1e9 * 1.0737 < 2.0 * bytes);
+    }
+    return decided_through;
 }
 
 // Returns true if this call closed the file (i.e. this thread was the last user).
@@ -125,11 +157,18 @@ int ServiceWriteCompressed::Service(PST pst, void* vin, int nIn, void* vout, int
         const double dvFac = in.dvFac;
         const unsigned thread = unsigned(mdl->Core());
 
+        const bool through = write_through_for(in.achPrefix, in.iWriteThrough, in.dBytesPerProcess);
+        out.nWriteThrough = through ? 1 : 0;
+        out.nThreads = 1;
+        {
+            std::lock_guard<std::mutex> lock(decide_mutex);
+            out.dMemAvailGB = decided_avail;
+        }
         for (unsigned k = 0; k < in.nPercents; ++k) {
             snapcomp::Header hk = h;
             hk.subsample = k;
             const std::string path = file_name(in.achPrefix, in.dPercents[k], mdl->Proc());
-            snapcomp::FileWriter* w = acquire(path, hk, mdl->Cores());
+            snapcomp::FileWriter* w = acquire(path, hk, mdl->Cores(), through);
             auto flush = [&] {
                 if (bi.empty()) return;
                 auto e0 = clock::now();

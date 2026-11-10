@@ -125,6 +125,10 @@ class FileWriter {
     void append(const void* data, size_t size, uint32_t n_particles, uint32_t thread = 0);
     void close(); // index + trailer + final header + fsync
     uint64_t bytes_written() const { return next_.load(); }
+    /// Write-through (Linux): each append waits until its block is on disk and drops it from the page
+    /// cache, so a snapshot needs no free RAM. Use when the node's memory is full (else it only adds
+    /// the disk time to the stall). Off by default.
+    void set_write_through(bool on) { write_through_ = on; }
 
   private:
     struct Entry {
@@ -137,6 +141,7 @@ class FileWriter {
     std::atomic<uint64_t> next_{HEADER_SIZE};
     std::mutex mtx_;
     std::vector<Entry> index_;
+    bool write_through_ = false;
     void pwrite_all(const void* data, size_t size, uint64_t offset);
 };
 

@@ -16,14 +16,17 @@
 #include "TraversePST.h"
 
 struct WriteCompressedStats {
-    std::uint64_t nWritten = 0;    // particles written
-    std::uint64_t nSkipped = 0;    // non-dark particles (not written)
-    std::uint64_t nBytes = 0;      // compressed block bytes
-    double dEncode = 0;            // thread-seconds in the encoder (sum)
-    double dWrite = 0;             // thread-seconds in appends (sum)
-    double dMaxThread = 0;         // slowest thread, seconds
-    std::uint64_t nScratch = 0;    // writer scratch bytes, summed over threads
-    std::uint64_t nScratchMax = 0; // largest per-thread scratch
+    std::uint64_t nWritten = 0;      // particles written
+    std::uint64_t nSkipped = 0;      // non-dark particles (not written)
+    std::uint64_t nBytes = 0;        // compressed block bytes
+    double dEncode = 0;              // thread-seconds in the encoder (sum)
+    double dWrite = 0;               // thread-seconds in appends (sum)
+    double dMaxThread = 0;           // slowest thread, seconds
+    std::uint64_t nScratch = 0;      // writer scratch bytes, summed over threads
+    std::uint64_t nScratchMax = 0;   // largest per-thread scratch
+    std::uint64_t nWriteThrough = 0; // threads whose files were written through (page cache bypassed)
+    std::uint64_t nThreads = 0;
+    double dMemAvailGB = 1e30; // smallest MemAvailable seen by a process when it decided
     WriteCompressedStats& operator+=(const WriteCompressedStats& r) {
         nWritten += r.nWritten;
         nSkipped += r.nSkipped;
@@ -33,6 +36,9 @@ struct WriteCompressedStats {
         dMaxThread = std::max(dMaxThread, r.dMaxThread);
         nScratch += r.nScratch;
         nScratchMax = std::max(nScratchMax, r.nScratchMax);
+        nWriteThrough += r.nWriteThrough;
+        nThreads += r.nThreads;
+        dMemAvailGB = std::min(dMemAvailGB, r.dMemAvailGB);
         return *this;
     }
 };
@@ -52,6 +58,8 @@ class ServiceWriteCompressed : public TraverseCount<WriteCompressedStats> {
         std::uint64_t nTotal, nLattice, iStep, iSeed;
         std::uint32_t nCell, nSub, nBlock, nPercents;
         std::int32_t iLevel;
+        std::int32_t iWriteThrough; // -1 auto (if MemAvailable < 2x this process's snapshot), 0 off, 1 on
+        double dBytesPerProcess;    // estimated compressed bytes per process, for the auto decision
     };
     static constexpr std::string_view name = "WriteCompressed";
     explicit ServiceWriteCompressed(PST pst, std::string_view service_name = name) : TraverseCount(pst, service_name, sizeof(input)) {}
