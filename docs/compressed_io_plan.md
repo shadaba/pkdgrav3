@@ -400,3 +400,36 @@ Same job, swap guard raised to 60 GB of growth. Measured as above; the ID check 
   [rockstar_pkc_session_prompt.md](rockstar_pkc_session_prompt.md).
 - Sahyadri-sandbox: the reader is meant to sit next to `scripts/post-process/readers.py`; not copied
   there yet (that repo belongs to a-paranjape; needs a branch and the owner's agreement).
+
+## 17. Potential in the compressed format: status and cost estimate (2026-11-10)
+- Status: not written. Format v1 holds positions, velocities and IDs only. HDF5 snapshots always carry
+  `Potential` (io/fio.c, FIO_FLAG_POTENTIAL); `bDoPotOutput` adds a separate `.pot` array file (text).
+  Production has one, `snap.02020.pot`, 111.8 GB (13 B/particle).
+- Computing it costs nothing extra: the gravity kernels always accumulate `fPot` (it feeds the energy
+  diagnostics, gravity/grav2.cxx), and with gravity on `bMemPotential` defaults to 1 (simulate.cxx), so
+  every run already stores it, 4 B of the 48-byte particle. The 2048^3 log shows `POTENTIAL` in the
+  memory model, i.e. it is already inside the 742-746 GiB. Snapshots are written at top-level step
+  boundaries, where gravity has just been computed for all rungs, so the stored value is current for
+  every particle (from reading the code; to be checked when implemented).
+- Bytes (Mac, `tools/snapcomp_proto/potcomp.py`, 128^3 HDF5 snapshots of section 11): potential in
+  peculiar (km/s)^2, spatial order (Morton key on 1024^3, blocks of 2^18), quantised with step dphi,
+  delta, zigzag, byte shuffle, zstd 3:
+
+  | dphi (km/s)^2 | L=12.5, z=3 | L=12.5, z=0 | L=200, z=0 |
+  |---|---|---|---|
+  | 1    | 1.62 | 1.66 | 2.36 |
+  | 10   | 1.26 | 1.29 | 1.88 |
+  | 100  | 0.78 | 0.83 | 1.50 |
+  | 1000 | 0.43 | 0.46 | 1.09 |
+
+  (B/particle; float32 + zstd: 3.5.) The velocity step (2.44 km/s) already gives a kinetic-energy error
+  of about +-370 (km/s)^2 at 300 km/s, so dphi = 100 (max error 50) is ample: about 0.8-1.5 B/particle,
+  10-20% on top of 5.3-8.9 B/particle. Python encode 5-9 ns/particle (zstd-bound) against 263 ns/particle
+  for the current encoder (2048^3 z=45: 2258 s summed over threads for 8.59e9 particles).
+- Estimate for 2048^3, 200 Mpc/h, 100 snapshots to z = 0 (single node, 192 threads, local SSD + drain):
+  RAM +0 (already stored; writer scratch +~1 MB/thread). Encode +~70 core-s per snapshot. Stall is
+  SSD-bound, so it grows with bytes: +~5-10 s per snapshot, ~15 min wall for the run, ~50 core-h.
+  Disk +~0.9 TB (vs ~7 TB for positions/velocities/IDs). Drain +~6 min per snapshot in the background.
+  Production 2048^3 took ~17.4 days of running on one node (file timestamps of
+  /storage/swarajit/pkdgrav3_sims/pkdgrav3_n2048_sahyadri, gaps between restarts removed), ~80,000
+  core-h at 192 threads: the potential adds ~0.06% (~0.1-0.15% of compute alone).
