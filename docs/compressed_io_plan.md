@@ -529,6 +529,42 @@ Estimate with compressed output staged on the local SSD + background drain:
 - Uncertain: the production HDF5 write time is inferred, not measured; the thread count of the
   production run is not known to me (192 assumed); our 2048^3 test runs with ~40 GB in swap.
 
+## 19. Staged checkpoints and restart; potential problems found (2026-11-10)
+Jobs 2536443 (`bench/phase5/chk512.pbs`) and 2536448 (`bench/phase5/det512.pbs`), pawna node1/node2, 64 threads.
+Run: 512^3, L = 50 Mpc/h, z = 49 -> 5 in 40 steps, compressed snapshots with the potential (step 100) and
+checkpoints every 10 steps; snapshots and checkpoints staged on local SSD (`CHKSTAGE=1`), checkpoints drained to
+home (`/user/shadab/pkdgrav3_io_chk`, `KEEPCHK=2`).
+- Staging works: checkpoint stall 3.2-4.2 s (ref) and 6.1-6.4 s (int), 6.0 GiB each (128 pieces), copied to home in
+  28-36 s (172-218 MB/s); snapshot stall 1.6-2.5 s, 7.6-8.3 B/particle of which potential 1.35-1.37; drain to
+  /storage 19-26 MB/s; keep-2 deleted the older checkpoints (restart file first) as each new one completed.
+- STOP file after step 24: pkdgrav3 wrote a checkpoint and snapshot at step 25 and exited (rc 0); restart from the
+  copy in home: "Checkpoint Restart Complete" in 7.9 s, ran to step 40. pkc_check of int step 40 against step 10
+  (before the restart): all IDs once, right subsamples, the 1% set unchanged.
+- Determinism: two uninterrupted runs (ref, ref2) are **bit-identical** at steps 30 and 40 (positions, velocities,
+  potential). The restarted run is not: step 30 (5 steps after the restart) 0.0015% of positions differ (max 5
+  steps), step 40 0.89% (0.15% by more than one step, max 51 steps = 0.1 Mpc/h). The restart does not reproduce the
+  state exactly; the small difference then grows chaotically. Not a staging problem (the checkpoint copy is
+  byte-exact by size; the same happens without staging in pkdgrav3 restarts generally). To investigate.
+- **Potential: two problems in pkdgrav3's potential (not in the writer: the HDF5 `Potential` of rs512 shows
+  them too).**
+  1. With `nReplicas = 2` (production `classic_replicas_switch` uses 2 above z = 20) every particle gets a large
+     extra constant: Mac 64^3 (L = 6.25, 8 threads and 1 thread alike) median -3.78e5 (km/s)^2 at z = 45 and
+     -2.13e5 at z = 25, against -1.34e4 and -8.0e3 with `nReplicas = 1` (which equals the self term -293/a).
+     A constant: harmless for forces and for potential differences inside one snapshot, wrong as an absolute.
+  2. In the 512^3 runs about 5% of particles (5.04% at z = 13, 5.15% at z = 5; 4% subsample) have potentials
+     of -5e6 to -8.5e7 (km/s)^2 (median of the others -5.4e4), mixed with normal particles in the same 2 Mpc/h
+     cells (offset deep - normal in 1690 such cells: median -1.25e7, 10-90% -1.8e7 to -5.4e6), concentrated at
+     high x (deep fraction 0, ..., 0.03, 0.07, 0.13, 0.32 in tenths of the box along x). In code units the offset is
+     about constant in time (-0.2 at z = 13, -0.23 at z = 5). rs512 HDF5 (L = 200, z = 3 and 0): minimum
+     -3.9e8 and -9.7e7 (km/s)^2, i.e. affected too. This breaks any use of the potential (e.g. unbinding).
+     The Mac 64^3 and 128^3 runs do not show it (no particle below 10x the median at z = 12; the section-17
+     checks passed), so it depends on size, threads or rungs. Cause not found yet: `p.potential()` is assigned
+     (not accumulated) next to the acceleration in gravity/grav2.cxx, and positions are right, so the extra
+     term is constant over each affected particle's neighbourhood (a local-expansion or Ewald constant).
+  Until this is understood, do not use the stored potential (compressed or HDF5) for science.
+- Restart differences in the potential (5.2% of particles at step 30, max 3.6e7) come from problem 2:
+  particles that are deep in one run and normal in the other at the same position.
+
 ## 20. Estimate: 2580^3 and 3250^3 on one node (2026-11-10)
 2580^3 = 1.72e10 particles (2.00x 2048^3), 3250^3 = 3.43e10 (4.00x).
 - Memory, measured at 2048^3 (job 2536432, ordered mode, no ID field, `mem.2536432.log` sampled every 15 s):
