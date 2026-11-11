@@ -79,6 +79,16 @@ Still open (2026-11-11):
 - Rockstar reading `.pkc` natively (separate session, rockstar_pkc_session_prompt.md); its
   `pkc_to_gadget` changes are on branch `pkc-to-gadget-v3`, to be merged into main when done.
 - Optional: halo-potential error of the pre-fix Ewald bug by halo mass (section 19).
+- ICs read from a file (`achInFile`, no `nGrid`): `units.cxx` derives physical units only when `nGrid` is set,
+  so all units are 1. HDF5 and `.pkc` headers then say BoxSize = h (0.6736) and the `.pkc` potential factor
+  `pot_to_kms2` is wrong. Workaround: give `dKpcUnit = L*1e3/h` and `dMsolUnit` (the nGrid-branch values) in the
+  parameter file (sahyadri-sandbox `make_pkdgrav3_par.py`, `IC_FILE`). A code fix would be to use that branch
+  whenever `bComove` and `dBoxSize` are set. Found on 2026-11-11 while setting up the Gadget-4 comparison
+  (sahyadri-sandbox branch `gadget-pkdgrav3-potential`, `scripts/gadget_pkdgrav3_compare/`). Production
+  `sahyadri2048.par` reads an IC file without these, so its HDF5 headers should be checked.
+- Gadget-2 input (`io/fio.c`): iOrder = the file's ParticleID, and `Reorder()` asserts iOrder = 0..N-1. Gadget
+  IDs 1..N must be shifted to 0..N-1 (the converter above does this), or the first standard (HDF5/Tipsy) output aborts.
+- HDF5 `Header/Time` written by pkdgrav3 is code time, not the scale factor; readers must use `Redshift`.
 
 ## 8. Notes after rebasing onto pkdgrav3 3.5.1 (2026-11-06)
 Section 3 was read from wullm 7a5041e (3.1.2). The branch is now based on upstream v3.5.1 (dcce745f), the release production runs; section 3 must be re-checked against it.
