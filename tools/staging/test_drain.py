@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test pkd_drain.py with a fake pkdgrav3 (no simulation): snapshots and checkpoints of the same steps,
-checkpoints to a separate destination with --keep-chk, an interrupted checkpoint, and --recover.
+checkpoints to a separate destination with --keep-chk, an interrupted checkpoint, --recover, and a copy
+that hangs (abandoned after --stall-s, retried as a new file).
 
 usage: test_drain.py [scratch_dir]      (Python standard library only; runs in a few seconds)
 """
@@ -117,6 +118,28 @@ def main(scratch):
         check(r == 0 and os.path.exists(os.path.join(chk, "snap.00050.chk.0")), "--recover copied the piece")
         check(sorted(n for n in os.listdir(chk) if n.endswith(".chk")) == ["snap.00030.chk", "snap.00040.chk"],
               "recovered piece did not count as a complete checkpoint")
+
+        print("a copy that hangs (NFS write stuck): abandoned after --stall-s, done again as a new file")
+        root_c = os.path.join(root, "c")
+        stage, dest = os.path.join(root_c, "stage"), os.path.join(root_c, "dest")
+        rep = os.path.join(root_c, "drain.log")
+        os.makedirs(root_c)
+        subprocess.check_call([sys.executable, DRAIN, "--stage", stage, "--dest", dest, "--init-only"])
+        for name, seed in (("snap.00060.s01.0.pkc", 61), ("snap.00070.s01.0.pkc", 71)):
+            blob(os.path.join(stage, "local", name), 3000000 + seed, seed)
+        t0 = time.time()
+        r = subprocess.call([sys.executable, DRAIN, "--stage", stage, "--dest", dest, "--recover", "--report", rep,
+                             "--poll", "0.2", "--stall-s", "3", "--retry-wait", "0.5"],
+                            env=dict(os.environ, PKD_DRAIN_TEST_STALL="snap.00060"))
+        text = open(rep).read()
+        check(r == 0, f"drain exit code 0 after the stall (got {r}, {time.time() - t0:.0f} s)")
+        check("STALLED copy" in text and "(attempt 2)" in text, "stall logged and the second attempt finished it")
+        for name, seed in (("snap.00060.s01.0.pkc", 61), ("snap.00070.s01.0.pkc", 71)):
+            blob(os.path.join(root, "w"), 3000000 + seed, seed)
+            check(digest(os.path.join(dest, name)) == digest(os.path.join(root, "w")), f"{name} identical")
+        check(not os.listdir(os.path.join(stage, "local")), "local staging directory empty")
+        check(sorted(n for n in os.listdir(dest) if ".part" in n) == ["snap.00060.s01.0.pkc.part"],
+              "only the abandoned first attempt is left as .part (a new name was used)")
     finally:
         shutil.rmtree(root)
     print("ALL OK" if not fails else f"FAILED: {fails}")
