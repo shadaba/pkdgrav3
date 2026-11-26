@@ -140,6 +140,54 @@ def main(scratch):
         check(not os.listdir(os.path.join(stage, "local")), "local staging directory empty")
         check(sorted(n for n in os.listdir(dest) if ".part" in n) == ["snap.00060.s01.0.pkc.part"],
               "only the abandoned first attempt is left as .part (a new name was used)")
+
+        for how in ("log", "recover"):
+            print(f"checkpoint split by a switch to NFS while written (restart file on NFS, first pieces local), "
+                  f"found {'from the log while pkdgrav3 runs' if how == 'log' else 'by --recover'}")
+            rd = os.path.join(root, "d" + how)
+            stage, dest, chk = (os.path.join(rd, x) for x in ("stage", "dest", "chkdest"))
+            log, rep = os.path.join(rd, "run.log"), os.path.join(rd, "drain.log")
+            os.makedirs(rd)
+            subprocess.check_call([sys.executable, DRAIN, "--stage", stage, "--dest", dest, "--chk-dest", chk, "--init-only"])
+            os.makedirs(chk, exist_ok=True)
+            def mkchk(where, step, pieces, restart=True):
+                c = os.path.join(where, f"snap.{step:05d}.chk")
+                for i in pieces:
+                    blob(f"{c}.{i}", 200000 + i, step * 10 + i)
+                    open(f"{c}.{i}.dec", "w").close()
+                if restart:
+                    blob(c + ".pkl", 3000, step)
+                    open(c, "w").write("import PKDGRAV as msr\nmsr.restore(__file__)\n")
+            mkchk(chk, 10, range(4))                       # two older complete checkpoints
+            mkchk(chk, 20, range(4))
+            mkchk(os.path.join(stage, "local_chk"), 30, range(3), restart=False)   # split: pieces 0-2 local,
+            mkchk(chk, 30, [3])                                                       # piece 3 + restart file on NFS
+            mkchk(chk, 25, range(2))                       # an incomplete one with a restart file (2 of 4 pieces)
+            args = [sys.executable, DRAIN, "--stage", stage, "--dest", dest, "--chk-dest", chk, "--keep-chk", "2",
+                    "--report", rep, "--poll", "0.2", "--min-free-gb", "0"]
+            if how == "log":
+                open(log, "w").write("Writing checkpoint for Step: 30 Time:0.1 Redshift:1\n"
+                                     "Checkpoint has been successfully written, Wallclock: 0.2 secs.\n")
+                sl = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
+                d = subprocess.Popen(args + ["--log", log, "--pid", str(sl.pid)])
+                sl.wait()                                  # (reaped, so the drain sees it end)
+                r = d.wait(timeout=120)
+            else:
+                r = subprocess.call(args + ["--recover"])
+            text = open(rep).read()
+            check(r == 0, f"drain exit code 0 (got {r})")
+            check(not os.listdir(os.path.join(stage, "local_chk")), "no checkpoint piece left on the local disk")
+            for i in range(4):
+                blob(os.path.join(root, "w"), 200000 + i, 300 + i)
+                check(digest(os.path.join(chk, f"snap.00030.chk.{i}")) == digest(os.path.join(root, "w")),
+                      f"snap.00030.chk.{i} on NFS identical")
+            check(os.path.exists(os.path.join(chk, "snap.00030.chk")) and not os.path.exists(os.path.join(chk, "snap.00030.chk.held")),
+                  "restart file back under its name, no .held left")
+            check("split checkpoint snap.00030.chk" in text and "restart file back" in text, "split logged")
+            have = sorted(n for n in os.listdir(chk) if n.endswith(".chk"))
+            check(have == ["snap.00020.chk", "snap.00025.chk", "snap.00030.chk"],
+                  f"--keep-chk 2: the incomplete 25 (restart file, 2 of 4 pieces) did not count, so the complete 20 "
+                  f"was kept beside 30; 10 deleted ({have})")
     finally:
         shutil.rmtree(root)
     print("ALL OK" if not fails else f"FAILED: {fails}")

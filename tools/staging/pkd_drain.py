@@ -22,8 +22,12 @@ Checkpoints (<stage>/chk -> <stage>/local_chk, its own directory so snapshot and
 same step never mix) are found from the log ("Checkpoint has been successfully written": the restart
 file <name>.<step>.chk is written last) and copied to --chk-dest (default --dest) by a second worker,
 in parallel with the snapshots, so they can go to a different file server. The restart file is copied
-last, so a checkpoint whose restart file is on the destination is complete. With --keep-chk K, older
-checkpoints in --chk-dest are deleted once K newer complete ones are there (restart file first).
+last, so a checkpoint whose restart file is on the destination is complete. A checkpoint split by a
+switch to NFS while it was written (local disk below --min-free-gb: restart file and last pieces on the
+destination, first pieces local) has its restart file renamed <name>.<step>.chk.held until the local
+pieces are copied. With --keep-chk K, older checkpoints in --chk-dest are deleted once K newer complete
+ones are there (restart file, .pkl, all data pieces non-empty, as many as the fullest checkpoint there;
+a restart file alone does not count), restart file first.
 
 Python standard library only (pawna has Python 3.10). One line per event in --report.
 """
@@ -41,6 +45,7 @@ import time
 WRITING = re.compile(r"Writing (\S+) in \S+ format")
 WRITTEN = re.compile(r"Output file has been successfully written")
 CHK_WRITTEN = re.compile(r"Checkpoint has been successfully written")
+HELD = ".held"  # restart file of a split checkpoint while its local pieces are copied
 CHK_NAME = re.compile(r"^(?P<name>.+)\.(?P<step>\d+)\.chk$")  # restart file of a checkpoint
 CHUNK = 16 << 20  # 16 MiB copies: large sequential NFS writes
 
@@ -174,10 +179,19 @@ class Drainer:
                 self.scan_checkpoints()
 
     def scan_checkpoints(self):
-        """Complete checkpoints in local_chk: their restart file (written last) exists."""
+        """Complete checkpoints in local_chk: their restart file (written last) exists. Also a checkpoint split by
+        a switch to NFS while it was written (local disk short of --min-free-gb): its restart file and last pieces
+        are in --chk-dest, its first pieces still in local_chk (pawna r4 step 1750, 26 Nov 2026: 375 of 384 files
+        were left on the local disk and the copy on NFS looked complete). drain_one copies those pieces."""
         for n in sorted(os.listdir(self.local_chk)):
             if CHK_NAME.match(n):
                 self.add(n, kind="chk")
+        d = self.a.chk_dest
+        if os.path.isdir(d) and os.path.realpath(d) != os.path.realpath(self.local_chk):
+            for n in sorted(os.listdir(d)):
+                b = n[:-len(HELD)] if n.endswith(HELD) else n
+                if CHK_NAME.match(b) and self.pieces(os.path.join(self.local_chk, b)):
+                    self.add(b, kind="chk")
 
     def scan_markers(self):
         for d in (self.local,):
@@ -272,6 +286,18 @@ class Drainer:
     def drain_one(self, name, marker, kind="snap"):
         local, _, dest = self.kinds[kind]
         files = self.pieces(os.path.join(local, name))
+        held = None
+        if kind == "chk" and files and not os.path.exists(os.path.join(local, name)):
+            rf = os.path.join(dest, name)
+            held = rf + HELD
+            if os.path.exists(rf):
+                # split checkpoint: its restart file is already on NFS. Renamed while the local pieces are copied,
+                # so that the copy on NFS does not count as complete before it is (job_sim's restart, pruning).
+                os.replace(rf, held)
+                self.say(f"split checkpoint {name}: {len(files)} file(s) still on the local disk, restart file in "
+                         f"{dest}; it is {os.path.basename(held)} until they are copied")
+            elif not os.path.exists(held):
+                held = None
         if not files:
             if self.pieces(os.path.join(dest, name)):
                 self.say("already on NFS", name)  # written while the link pointed to dest
@@ -288,6 +314,14 @@ class Drainer:
             total += size
         for src in files:      # delete only after every piece is safely on NFS
             os.unlink(src)
+        if held:
+            os.replace(held, held[:-len(HELD)])
+            dfd = os.open(dest, os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+            self.say(f"split checkpoint {name}: all pieces on NFS, restart file back")
         if marker and os.path.exists(marker):
             os.unlink(marker)
         dt = time.time() - t0
@@ -297,8 +331,23 @@ class Drainer:
             self.prune_checkpoints()
         return True
 
+    def chk_counts(self, base):
+        """(data pieces, .dec files, empty data pieces, restart file and .pkl present) of checkpoint ``base``."""
+        nd = nx = ne = 0
+        for p in self.pieces(base):
+            n = os.path.basename(p)[len(os.path.basename(base)):]
+            if re.fullmatch(r"\.\d+", n):
+                nd += 1
+                ne += os.path.getsize(p) == 0
+            elif re.fullmatch(r"\.\d+\.dec", n):
+                nx += 1
+        return nd, nx, ne, os.path.isfile(base) and os.path.getsize(base) > 0 and os.path.exists(base + ".pkl")
+
     def prune_checkpoints(self):
-        """Keep the newest --keep-chk complete checkpoints in chk_dest; delete older ones (restart file first)."""
+        """Keep the newest --keep-chk complete checkpoints in chk_dest; delete the ones older than those (restart
+        file first). Complete: restart file, .pkl, as many non-empty data pieces as the fullest checkpoint of the
+        run there, and as many .dec files when it has them. A restart file alone does not count (a split or
+        partly copied checkpoint has one), so an incomplete newer checkpoint never removes a good older one."""
         K = self.a.keep_chk
         if K <= 0:
             return
@@ -310,16 +359,20 @@ class Drainer:
                 by_name.setdefault(m.group("name"), []).append((int(m.group("step")), n))
         for lst in by_name.values():
             lst.sort()
-            if len(lst) <= K:
+            counts = {base: self.chk_counts(os.path.join(d, base)) for _, base in lst}
+            full = max(c[0] for c in counts.values())
+            good = [s for s, base in lst if counts[base][3] and counts[base][0] == full and counts[base][2] == 0
+                    and counts[base][1] in (0, full)]
+            if len(good) <= K:
                 continue
-            for _, base in lst[:-K]:
+            for _, base in [x for x in lst if x[0] < good[-K]]:
                 gone = [os.path.join(d, base)] + [p for p in self.pieces(os.path.join(d, base)) if os.path.basename(p) != base]
                 total = 0
                 for p in gone:
                     total += os.path.getsize(p)
                     os.unlink(p)
                 self.say(f"deleted old checkpoint {os.path.join(d, base)} ({len(gone)} files, {total/2**30:.2f} GiB); "
-                         f"kept {', '.join(n for _, n in lst[-K:])}")
+                         f"kept {', '.join(n for s, n in lst if s >= good[-K])}")
 
     # ---- main loop ---------------------------------------------------------------------
     def alive(self):
@@ -424,6 +477,11 @@ def main():
         bases = [n for n in names if CHK_NAME.match(n)]
         for n in names:
             if re.search(r"\.part\d*$", n) or (n not in bases and any(n.startswith(b + ".") for b in bases)):
+                continue
+            m = re.match(r"^(.+\.\d+\.chk)\.", n)
+            if m and m.group(1) not in bases and any(os.path.exists(os.path.join(d.a.chk_dest, m.group(1) + x))
+                                                     for x in ("", HELD)):
+                d.add(m.group(1), kind="chk")   # split checkpoint (restart file on NFS): one unit
                 continue
             d.add(n, kind="chk")
         d.stop = True  # no pid to wait for: drain once and exit
